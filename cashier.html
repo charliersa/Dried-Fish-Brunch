@@ -135,9 +135,12 @@
           </div>
           <div class="order-footer">
             <span style="font-weight:900;color:var(--pink);">$${order.total}</span>
-            ${order.status === 'done' 
-              ? `<span style="font-weight:700;color:var(--green);">✔️ 已完成</span>`
-              : `<button class="button-primary" style="background:var(--green);" data-action="mark-done" data-id="${order.id}">✔️ 標記完成</button>`
+            ${order.status === 'done'
+              ? `<span style="font-weight:700;color:var(--green);">${order.pay && order.pay.method === 'cash' ? '💵 已收現金' : order.pay && order.pay.method === 'mobile' ? '📱 已收行動' : '✔️ 已完成'}</span>`
+              : `<div style="display:flex;gap:6px;">
+                   <button class="pill-button" style="border-color:var(--green);color:var(--green);" data-action="pay-cash" data-id="${order.id}">💵 現金</button>
+                   <button class="pill-button" style="border-color:var(--blue);color:var(--blue);" data-action="pay-mobile" data-id="${order.id}">📱 行動</button>
+                 </div>`
             }
           </div>
         </div>
@@ -153,13 +156,15 @@
       const action = btn.dataset.action;
       if (!action) return;
 
-      if (action === 'mark-done') {
+      if (action === 'pay-cash' || action === 'pay-mobile') {
         const id = btn.dataset.id;
+        const method = action === 'pay-cash' ? 'cash' : 'mobile';
         const order = orders.find(o => o.id === id);
         if (order && order.status !== 'done') {
           order.status = 'done'; // 樂觀更新
+          order.pay = { method, paid: true };
           renderCashier();
-          syncUpdateOrder(id, { status: 'done' });
+          syncUpdateOrder(id, { status: 'done', pay: { method, paid: true }, updatedAt: Date.now() });
         }
       }
     }

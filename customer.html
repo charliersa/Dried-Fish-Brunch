@@ -279,8 +279,9 @@
         }
       }
 
-      const menuSections = MENU.map(category => {
-        const items = category.items.map(item => renderMenuItem(category, item)).join('');
+      const menuSections = CURRENT_MENU.map(category => {
+        const items = category.items.filter(it => it.active !== false).map(item => renderMenuItem(category, item)).join('');
+        if (!items) return '';
         return `<section class="section"><div class="section-title"><span style="font-size:22px">${category.icon}</span><h2>${category.name}</h2><div class="section-divider"></div></div><div class="grid">${items}</div></section>`;
       }).join('');
 
@@ -299,6 +300,15 @@
     }
 
     function renderMenuItem(category, item) {
+      if (item.soldOut) {
+        return `
+        <div class="card" style="opacity:.55;">
+          <div class="menu-info">
+            <div class="menu-title"><span>${item.name}</span><span class="menu-price">$${item.price}</span></div>
+          </div>
+          <button class="pill-button" disabled style="opacity:.8;cursor:default;">售完</button>
+        </div>`;
+      }
       const temp = category.temp ? (state.temp[item.id] || '冷') : '';
       const key = item.id + (temp ? '_' + temp : '');
       const qty = state.cart[key] ? state.cart[key].qty : 0;
@@ -507,10 +517,15 @@
         type: state.diningType,
         table: state.tableInfo.trim() || (state.diningType === '內用' ? '未填桌號' : '未填名稱'),
         note: state.note.trim(),
-        items: cartLines().map(line => ({ ...line })),
+        items: cartLines().map(line => {
+          const mi = getItem(line.id);
+          return { id: line.id, name: mi ? mi.name : '', price: mi ? mi.price : 0, temp: line.temp || '', qty: line.qty };
+        }),
         total: cartTotal(),
         status: 'new',
+        pay: { method: null, paid: false },
         createdAt: Date.now(),
+        updatedAt: Date.now(),
       };
       orders = orders.concat([order]); // 樂觀更新，雲端快照回來後會自動校正
       syncAddOrder(order);
@@ -525,6 +540,9 @@
     initSync(list => {
       orders = list;
       if (state.currentOrderId) renderCustomer();
+    });
+    initConfig(() => {
+      if (!state.currentOrderId) renderCustomer();
     });
 
     if ('serviceWorker' in navigator) {

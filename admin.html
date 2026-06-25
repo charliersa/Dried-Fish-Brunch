@@ -94,6 +94,97 @@
       background: linear-gradient(90deg, #ec6398, #d84b84);
     }
 
+    .admin-tabs {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      margin-bottom: 16px;
+      padding-bottom: 2px;
+    }
+
+    .admin-tab {
+      flex-shrink: 0;
+      white-space: nowrap;
+      border: 1.5px solid var(--line);
+      background: #fff;
+      color: var(--ink-soft);
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 700;
+      padding: 9px 18px;
+      border-radius: 999px;
+    }
+
+    .admin-tab.active {
+      border: none;
+      background: var(--ink);
+      color: #fff;
+    }
+
+    .ent-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      background: #fff;
+      border-radius: 14px;
+      padding: 11px 13px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+      box-shadow: 0 2px 6px rgba(28, 94, 122, .05);
+    }
+
+    .ent-row.low {
+      border: 1.5px solid #f2c4be;
+    }
+
+    .mini-btn {
+      border: 1.5px solid var(--line);
+      background: #fff;
+      color: var(--ink-soft);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 6px 10px;
+      border-radius: 999px;
+    }
+
+    .badge {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 9px;
+      border-radius: 999px;
+    }
+
+    .add-btn {
+      border: none;
+      background: var(--pink);
+      color: #fff;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 8px 14px;
+      border-radius: 999px;
+    }
+
+    .hist-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .hist-table th,
+    .hist-table td {
+      text-align: left;
+      padding: 8px 6px;
+      border-bottom: 1px solid #eef5f8;
+    }
+
+    .hist-table th {
+      color: var(--ink-soft);
+      font-size: 12px;
+    }
+
     /* PIN 鎖畫面 */
     .pin-overlay {
       position: fixed;
@@ -282,114 +373,456 @@
       `).join('');
     }
 
-    function renderDashboard() {
-      const today = orders.filter(o => isToday(o.createdAt));
-      const done = today.filter(o => o.status === 'done');
-      const pending = today.length - done.length;
-      const revenue = done.reduce((sum, o) => sum + (o.total || 0), 0);
-      const avg = done.length ? Math.round(revenue / done.length) : 0;
+    // ===== 管理後台狀態 =====
+    let cfg = { menu: CURRENT_MENU, ent: JSON.parse(JSON.stringify(DEFAULT_ENT)) };
+    let aTab = 'revenue';
+    let editItem = null; // 菜單品項編輯
+    let editEnt = null;  // 員工/食材/設備/成本編輯
+    let histScope = 'today';
 
-      // 今日分類營收（以已完成訂單計）
-      const catMap = {};
-      done.forEach(o => (o.items || []).forEach(it => {
-        const menuItem = getItem(it.id);
-        const cat = ITEM_CAT[it.id];
-        if (!menuItem || !cat) return;
-        catMap[cat.id] = catMap[cat.id] || { name: cat.icon + ' ' + cat.name, value: 0 };
-        catMap[cat.id].value += menuItem.price * it.qty;
-      }));
-      const catRows = Object.values(catMap).sort((a, b) => b.value - a.value);
+    const ADMIN_TABS = [
+      { k: 'revenue', label: '營收管理' }, { k: 'ops', label: '營運管理' }, { k: 'cost', label: '成本管理' },
+      { k: 'payroll', label: '薪資管理' }, { k: 'ing', label: '食材管理' }, { k: 'equip', label: '設備管理' },
+      { k: 'menu', label: '菜單管理' }, { k: 'history', label: '歷史訂單' },
+    ];
 
-      // 今日熱銷排行（以全部今日訂單份數計）
-      const itemMap = {};
-      today.forEach(o => (o.items || []).forEach(it => {
-        const menuItem = getItem(it.id);
-        if (!menuItem) return;
-        itemMap[it.id] = itemMap[it.id] || { name: menuItem.name, value: 0 };
-        itemMap[it.id].value += it.qty;
-      }));
-      const topRows = Object.values(itemMap).sort((a, b) => b.value - a.value).slice(0, 6);
-
-      // 內用 / 外帶 分布
-      const dineIn = today.filter(o => o.type === '內用').length;
-      const takeout = today.length - dineIn;
-
-      // 營業時段分布（今日訂單數，依小時）
-      const hourMap = {};
-      today.forEach(o => {
-        const h = new Date(o.createdAt).getHours();
-        hourMap[h] = (hourMap[h] || 0) + 1;
-      });
-      const hours = Object.keys(hourMap).map(Number).sort((a, b) => a - b);
-      const hourRows = hours.map(h => ({ label: h + ':00', value: hourMap[h] }));
-
-      // 近 7 日營收（已完成訂單）
-      const dayRows = [];
-      const now = new Date();
-      const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
-        const key = d.toLocaleDateString('zh-TW');
-        const sum = orders
-          .filter(o => o.status === 'done' && new Date(o.createdAt).toLocaleDateString('zh-TW') === key)
-          .reduce((s, o) => s + (o.total || 0), 0);
-        dayRows.push({ label: '週' + weekdays[d.getDay()], value: sum });
-      }
-
-      app.innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
-          <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);">📊 營業數據 · 每 4 秒自動更新</div>
-          <button id="logout-btn" class="pill-button">🔓 登出</button>
-        </div>
-        <div class="stats-grid">
-          ${renderStat('今日營收', '$' + revenue, 'var(--green)')}
-          ${renderStat('今日訂單', today.length)}
-          ${renderStat('平均客單價', '$' + avg, 'var(--pink)')}
-          ${renderStat('未取餐', pending, 'var(--amber)')}
-        </div>
-
-        <div class="admin-card">
-          <h3>近 7 日營收</h3>
-          ${barChart(dayRows, v => '$' + v)}
-        </div>
-
-        <div class="admin-cols">
-          <div class="admin-card">
-            <h3>今日分類營收</h3>
-            ${rankList(catRows, v => '$' + v, '今天還沒有完成的訂單')}
-          </div>
-          <div class="admin-card">
-            <h3>今日熱銷排行</h3>
-            ${rankList(topRows, v => v + ' 份', '今天還沒有銷售紀錄')}
-          </div>
-          <div class="admin-card">
-            <h3>內用 / 外帶分布</h3>
-            ${rankList(
-              [
-                { name: '🍽️ 內用', value: dineIn },
-                { name: '🛍️ 外帶', value: takeout },
-              ].filter(r => r.value > 0),
-              v => v + ' 筆',
-              '今天還沒有訂單'
-            )}
-          </div>
-        </div>
-
-        <div class="admin-card">
-          <h3>營業時段分布（今日訂單數）</h3>
-          ${hourRows.length ? barChart(hourRows) : '<div style="color:#9db4bf;font-size:14px;padding:10px 0;">今天還沒有訂單</div>'}
-        </div>
-      `;
-
-      document.getElementById('logout-btn').addEventListener('click', () => {
-        if (auth) auth.signOut();
-      });
+    const money = n => '$' + (n || 0).toLocaleString();
+    const fmtTime = ts => new Date(ts).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const fmtDate = ts => new Date(ts).toLocaleDateString('zh-TW', { month: '2-digit', day: '2-digit' });
+    const STATUS = {
+      new: { label: '新訂單', color: '#E89A2B', bg: '#FCF1DC' },
+      cook: { label: '製作中', color: '#3E9BD1', bg: '#E3F1FB' },
+      done: { label: '完成', color: '#3FA877', bg: '#E1F4EA' },
+    };
+    const isPaid = o => (o.pay && o.pay.paid) || o.status === 'done';
+    const nameOf = it => it.name || (getItem(it.id) ? getItem(it.id).name : '(未知)');
+    const priceOf = it => (it.price != null ? it.price : (getItem(it.id) ? getItem(it.id).price : 0));
+    function catNameOf(it) {
+      for (const c of CURRENT_MENU) for (const i of c.items) if (i.id === it.id || i.name === it.name) return c.name;
+      return '其他';
     }
 
+    // ---------- 各分頁內容 ----------
+    function tabRevenue() {
+      const today = orders.filter(o => isToday(o.createdAt));
+      const paid = today.filter(isPaid);
+      const revenue = paid.reduce((s, o) => s + (o.total || 0), 0);
+      const doneC = today.filter(o => o.status === 'done').length;
+      const dineIn = today.filter(o => o.type === '內用').length;
+      const takeout = today.length - dineIn;
+      const cash = today.filter(o => o.pay && o.pay.paid && o.pay.method === 'cash').reduce((s, o) => s + o.total, 0);
+      const mobile = today.filter(o => o.pay && o.pay.paid && o.pay.method === 'mobile').reduce((s, o) => s + o.total, 0);
+      const unpaid = today.filter(o => !isPaid(o)).reduce((s, o) => s + (o.total || 0), 0);
+
+      const catMap = {};
+      paid.forEach(o => (o.items || []).forEach(it => {
+        const cn = catNameOf(it);
+        catMap[cn] = (catMap[cn] || 0) + priceOf(it) * it.qty;
+      }));
+      const catRows = Object.entries(catMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+
+      const itemMap = {};
+      today.forEach(o => (o.items || []).forEach(it => {
+        const n = nameOf(it);
+        itemMap[n] = (itemMap[n] || 0) + it.qty;
+      }));
+      const topRows = Object.entries(itemMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 6);
+
+      const now = new Date();
+      const dayRows = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+        const key = d.toDateString();
+        const sum = orders.filter(o => isPaid(o) && new Date(o.createdAt).toDateString() === key).reduce((s, o) => s + (o.total || 0), 0);
+        dayRows.push({ label: (d.getMonth() + 1) + '/' + d.getDate(), value: sum });
+      }
+
+      const payRows = [
+        { name: '💵 現金', value: cash }, { name: '📱 行動支付', value: mobile }, { name: '⏳ 未結帳', value: unpaid },
+      ].filter(r => r.value > 0);
+
+      return `
+        <div class="stats-grid">
+          ${renderStat('今日訂單', today.length)}
+          ${renderStat('已收營業額', '$' + revenue, 'var(--green)')}
+          ${renderStat('已完成', doneC, 'var(--blue)')}
+          ${renderStat('內用 / 外帶', dineIn + ' / ' + takeout, 'var(--pink)')}
+        </div>
+        <div class="admin-card"><h3>近 7 日營收</h3>${barChart(dayRows, v => '$' + v)}</div>
+        <div class="admin-cols">
+          <div class="admin-card"><h3>付款方式分布</h3>${rankList(payRows, v => '$' + v, '今天還沒有銷售紀錄')}</div>
+          <div class="admin-card"><h3>今日分類營收</h3>${rankList(catRows, v => '$' + v, '今天還沒有完成的訂單')}</div>
+          <div class="admin-card"><h3>今日熱銷排行</h3>${rankList(topRows, v => v + ' 份', '今天還沒有銷售紀錄')}</div>
+        </div>`;
+    }
+
+    function tabOps() {
+      const today = orders.filter(o => isToday(o.createdAt));
+      const totalT = today.length;
+      const completion = totalT ? Math.round(today.filter(o => o.status === 'done').length / totalT * 100) : 0;
+      const avgItems = totalT ? (today.reduce((s, o) => s + (o.items || []).reduce((a, i) => a + i.qty, 0), 0) / totalT) : 0;
+      const doneOrders = today.filter(o => o.status === 'done' && o.updatedAt && o.updatedAt > o.createdAt);
+      const avgPrep = doneOrders.length ? Math.round(doneOrders.reduce((s, o) => s + (o.updatedAt - o.createdAt), 0) / doneOrders.length / 60000) : 0;
+      const dineIn = today.filter(o => o.type === '內用').length;
+      const takeout = totalT - dineIn;
+      const hrs = [6, 7, 8, 9, 10, 11, 12];
+      const hc = {};
+      today.forEach(o => { const h = new Date(o.createdAt).getHours(); hc[h] = (hc[h] || 0) + 1; });
+      const hourRows = hrs.map(h => ({ label: h + '時', value: hc[h] || 0 }));
+
+      return `
+        <div class="stats-grid">
+          ${renderStat('今日訂單', totalT)}
+          ${renderStat('完成率', completion + '%', 'var(--green)')}
+          ${renderStat('平均每單品項', avgItems.toFixed(1), 'var(--pink)')}
+          ${renderStat('平均出餐時間', avgPrep + ' 分', 'var(--amber)')}
+        </div>
+        <div class="admin-card"><h3>營業時段分布（今日訂單數）</h3>${barChart(hourRows)}</div>
+        <div class="admin-card"><h3>即時營運概況</h3>
+          ${[
+            { name: '內用 / 外帶', value: dineIn + ' / ' + takeout },
+            { name: '製作中 / 待製作', value: today.filter(o => o.status === 'cook').length + ' / ' + today.filter(o => o.status === 'new').length },
+          ].map(r => `<div class="ent-row"><span style="font-weight:700;">${r.name}</span><span style="font-weight:900;color:var(--ink-soft);">${r.value}</span></div>`).join('')}
+        </div>`;
+    }
+
+    function tabCost() {
+      const now = new Date();
+      const payrollTotal = (cfg.ent.staff || []).reduce((a, s) => a + (s.wage || 0) * (s.hours || 0), 0);
+      const costRows = [
+        ...(cfg.ent.costs || []).map(c => ({ label: c.label, amount: c.amount || 0, id: c.id, auto: false })),
+        { label: '人事薪資（自動）', amount: payrollTotal, id: '_pay', auto: true },
+      ];
+      const costTotal = costRows.reduce((a, c) => a + c.amount, 0);
+      const sameMonth = ts => { const d = new Date(ts); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); };
+      const monthRev = orders.filter(o => isPaid(o) && sameMonth(o.createdAt)).reduce((s, o) => s + (o.total || 0), 0);
+      const profit = monthRev - costTotal;
+      const maxCost = Math.max(1, ...costRows.map(c => c.amount));
+
+      const bars = costRows.map(c => `
+        <div class="rank-row">
+          <div class="rank-head">
+            <b>${escapeHtml(c.label)}</b>
+            <span style="display:flex;align-items:center;gap:8px;color:var(--ink-soft);">
+              ${money(c.amount)}
+              ${c.auto ? '' : `<button class="mini-btn" data-action="ent-edit" data-kind="cost" data-id="${c.id}">編輯</button><button class="mini-btn" data-action="ent-del" data-kind="cost" data-id="${c.id}">🗑</button>`}
+            </span>
+          </div>
+          <div class="rank-track"><div class="rank-fill" style="width:${Math.round(c.amount / maxCost * 100)}%;${c.auto ? 'background:linear-gradient(90deg,#6fb7d0,#3e9bd1);' : ''}"></div></div>
+        </div>`).join('');
+
+      return `
+        <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);">
+          ${renderStat('本月營收', money(monthRev), 'var(--green)')}
+          ${renderStat('本月成本', money(costTotal), '#e5534b')}
+          ${renderStat('本月毛利', money(profit), profit >= 0 ? 'var(--green)' : '#e5534b')}
+        </div>
+        <div class="admin-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+            <h3 style="margin:0;">本月成本明細</h3>
+            <button class="add-btn" data-action="ent-add" data-kind="cost">＋ 新增成本</button>
+          </div>
+          ${bars}
+        </div>`;
+    }
+
+    function tabPayroll() {
+      const staff = cfg.ent.staff || [];
+      const total = staff.reduce((a, s) => a + (s.wage || 0) * (s.hours || 0), 0);
+      const rows = staff.map(s => `
+        <div class="ent-row">
+          <div>
+            <div style="font-weight:700;">${escapeHtml(s.name)} <span style="font-size:12px;color:var(--ink-soft);font-weight:400;">${escapeHtml(s.role || '')}</span></div>
+            <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">時薪 $${s.wage} × ${s.hours} 小時</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-weight:900;color:var(--pink);">${money((s.wage || 0) * (s.hours || 0))}</span>
+            <button class="mini-btn" data-action="ent-edit" data-kind="staff" data-id="${s.id}">編輯</button>
+            <button class="mini-btn" data-action="ent-del" data-kind="staff" data-id="${s.id}">🗑</button>
+          </div>
+        </div>`).join('') || '<div style="color:#9db4bf;padding:10px 0;">尚無員工資料</div>';
+      return `
+        <div class="stats-grid" style="grid-template-columns:repeat(2,1fr);">
+          ${renderStat('員工人數', staff.length)}
+          ${renderStat('本月薪資總額', money(total), 'var(--pink)')}
+        </div>
+        <div class="admin-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+            <h3 style="margin:0;">員工薪資</h3>
+            <button class="add-btn" data-action="ent-add" data-kind="staff">＋ 新增員工</button>
+          </div>
+          ${rows}
+        </div>`;
+    }
+
+    function tabIng() {
+      const ings = cfg.ent.ingredients || [];
+      const low = ings.filter(g => (g.stock || 0) <= (g.lowAt || 0)).length;
+      const rows = ings.map(g => {
+        const isLow = (g.stock || 0) <= (g.lowAt || 0);
+        return `
+        <div class="ent-row${isLow ? ' low' : ''}">
+          <div>
+            <div style="font-weight:700;">${escapeHtml(g.name)} <span class="badge" style="background:${isLow ? '#fbe3e1' : '#e1f4ea'};color:${isLow ? '#e5534b' : '#3fa877'};">${isLow ? '需補貨' : '庫存正常'}</span></div>
+            <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">安全庫存 ${g.lowAt} ${g.unit} · ${escapeHtml(g.supplier || '')}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <button class="mini-btn" data-action="ing-minus" data-id="${g.id}">－</button>
+            <span style="font-weight:900;min-width:54px;text-align:center;">${g.stock} ${g.unit}</span>
+            <button class="mini-btn" data-action="ing-plus" data-id="${g.id}">＋</button>
+            <button class="mini-btn" data-action="ent-edit" data-kind="ingredient" data-id="${g.id}">編輯</button>
+            <button class="mini-btn" data-action="ent-del" data-kind="ingredient" data-id="${g.id}">🗑</button>
+          </div>
+        </div>`;
+      }).join('') || '<div style="color:#9db4bf;padding:10px 0;">尚無食材資料</div>';
+      return `
+        <div class="stats-grid" style="grid-template-columns:repeat(2,1fr);">
+          ${renderStat('食材品項', ings.length)}
+          ${renderStat('需補貨', low, low > 0 ? '#e5534b' : 'var(--green)')}
+        </div>
+        <div class="admin-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+            <h3 style="margin:0;">食材庫存</h3>
+            <button class="add-btn" data-action="ent-add" data-kind="ingredient">＋ 新增食材</button>
+          </div>
+          ${rows}
+        </div>`;
+    }
+
+    function tabEquip() {
+      const eq = cfg.ent.equipment || [];
+      const attention = eq.filter(q => q.status !== '正常').length;
+      const color = { '正常': '#3fa877', '保養中': '#e89a2b', '維修中': '#e5534b' };
+      const bg = { '正常': '#e1f4ea', '保養中': '#fcf1dc', '維修中': '#fbe3e1' };
+      const rows = eq.map(q => `
+        <div class="ent-row">
+          <div>
+            <div style="font-weight:700;">${escapeHtml(q.name)}</div>
+            <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">上次保養 ${escapeHtml(q.lastService || '—')}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button class="badge" data-action="eq-cycle" data-id="${q.id}" style="cursor:pointer;border:none;background:${bg[q.status] || '#eef5f8'};color:${color[q.status] || '#4690ae'};font-size:12px;padding:5px 12px;">${q.status}</button>
+            <button class="mini-btn" data-action="ent-edit" data-kind="equipment" data-id="${q.id}">編輯</button>
+            <button class="mini-btn" data-action="ent-del" data-kind="equipment" data-id="${q.id}">🗑</button>
+          </div>
+        </div>`).join('') || '<div style="color:#9db4bf;padding:10px 0;">尚無設備資料</div>';
+      return `
+        <div class="stats-grid" style="grid-template-columns:repeat(2,1fr);">
+          ${renderStat('設備總數', eq.length)}
+          ${renderStat('待處理', attention, attention > 0 ? '#e5534b' : 'var(--green)')}
+        </div>
+        <div class="admin-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+            <h3 style="margin:0;">設備狀態 <span style="font-size:12px;color:var(--ink-soft);font-weight:400;">（點狀態可切換）</span></h3>
+            <button class="add-btn" data-action="ent-add" data-kind="equipment">＋ 新增設備</button>
+          </div>
+          ${rows}
+        </div>`;
+    }
+
+    function tabMenu() {
+      return cfg.menu.map(cat => {
+        const items = cat.items.map(it => {
+          const off = it.active === false, so = !!it.soldOut;
+          return `
+          <div class="ent-row" style="opacity:${off ? .5 : 1};">
+            <div style="font-weight:700;">${escapeHtml(it.name)} <span style="color:var(--ink-soft);font-weight:400;">$${it.price}</span>${so ? ' <span class="badge" style="background:#fcf1dc;color:#e89a2b;">售完</span>' : ''}</div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+              <button class="mini-btn" data-action="item-active" data-cat="${cat.id}" data-id="${it.id}">${off ? '上架' : '下架'}</button>
+              <button class="mini-btn" data-action="item-sold" data-cat="${cat.id}" data-id="${it.id}" style="background:${so ? '#e1f4ea' : '#fcf1dc'};color:${so ? '#3fa877' : '#e89a2b'};border:none;">${so ? '補貨' : '售完'}</button>
+              <button class="mini-btn" data-action="item-edit" data-cat="${cat.id}" data-id="${it.id}">編輯</button>
+              <button class="mini-btn" data-action="item-del" data-cat="${cat.id}" data-id="${it.id}">🗑</button>
+            </div>
+          </div>`;
+        }).join('');
+        return `
+          <div class="admin-card">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+              <h3 style="margin:0;">${cat.icon} ${escapeHtml(cat.name)}</h3>
+              <button class="add-btn" data-action="item-add" data-cat="${cat.id}">＋ 新增品項</button>
+            </div>
+            ${items}
+          </div>`;
+      }).join('');
+    }
+
+    function tabHistory() {
+      const today = orders.filter(o => isToday(o.createdAt));
+      const pool = histScope === 'today' ? today : orders;
+      const rev = pool.filter(isPaid).reduce((s, o) => s + (o.total || 0), 0);
+      const list = pool.slice().sort((a, b) => b.createdAt - a.createdAt);
+      const rowsHtml = list.map(o => {
+        const st = STATUS[o.status] || STATUS.new;
+        const pd = o.pay && o.pay.paid;
+        const payLabel = pd ? (o.pay.method === 'cash' ? '💵 現金' : '📱 行動') : (o.status === 'done' ? '已完成' : '未結');
+        const when = histScope === 'today' ? fmtTime(o.createdAt) : (fmtDate(o.createdAt) + ' ' + fmtTime(o.createdAt));
+        return `<tr>
+          <td style="font-weight:900;color:var(--pink);">${o.no}</td>
+          <td>${when}</td>
+          <td>${o.type} · ${escapeHtml(o.table || '')}</td>
+          <td><span class="badge" style="background:${st.bg};color:${st.color};">${st.label}</span></td>
+          <td style="color:${pd ? '#3fa877' : '#9db4bf'};font-weight:700;">${payLabel}</td>
+          <td style="font-weight:900;text-align:right;">$${o.total}</td>
+        </tr>`;
+      }).join('');
+      const tbtn = on => `border-radius:999px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer;${on ? 'border:none;background:var(--ink);color:#fff;' : 'border:1.5px solid var(--line);background:#fff;color:var(--ink-soft);'}`;
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+          <div style="display:flex;gap:8px;">
+            <button data-action="hist-today" style="${tbtn(histScope === 'today')}">今日</button>
+            <button data-action="hist-all" style="${tbtn(histScope === 'all')}">全部</button>
+          </div>
+          <div style="font-size:14px;">營收：<b style="color:var(--green);">$${rev}</b> · 共 ${list.length} 筆</div>
+        </div>
+        <div class="admin-card">
+          ${list.length ? `<table class="hist-table"><thead><tr><th>單號</th><th>時間</th><th>類型 / 桌號</th><th>狀態</th><th>付款</th><th style="text-align:right;">金額</th></tr></thead><tbody>${rowsHtml}</tbody></table>` : '<div style="color:#9db4bf;padding:10px 0;">沒有訂單紀錄</div>'}
+        </div>`;
+    }
+
+    // ---------- 編輯彈窗 ----------
+    function fieldDefs(kind) {
+      if (kind === 'staff') return [{ key: 'name', label: '姓名', type: 'text' }, { key: 'role', label: '職務', type: 'text' }, { key: 'wage', label: '時薪', type: 'number' }, { key: 'hours', label: '本月時數', type: 'number' }];
+      if (kind === 'ingredient') return [{ key: 'name', label: '品名', type: 'text' }, { key: 'unit', label: '單位', type: 'text' }, { key: 'stock', label: '目前庫存', type: 'number' }, { key: 'lowAt', label: '安全庫存', type: 'number' }, { key: 'supplier', label: '供應商', type: 'text' }];
+      if (kind === 'equipment') return [{ key: 'name', label: '設備名稱', type: 'text' }, { key: 'lastService', label: '上次保養（例 2026/06/01）', type: 'text' }];
+      if (kind === 'cost') return [{ key: 'label', label: '成本項目', type: 'text' }, { key: 'amount', label: '本月金額', type: 'number' }];
+      return [];
+    }
+    const entListKey = kind => kind === 'staff' ? 'staff' : kind === 'ingredient' ? 'ingredients' : kind === 'equipment' ? 'equipment' : 'costs';
+
+    function renderModals() {
+      let html = '';
+      if (editItem) {
+        html += `
+          <div class="pin-overlay"><div class="pin-box" style="max-width:320px;">
+            <h3 style="font-size:17px;font-weight:900;margin:0 0 14px;">${editItem.isNew ? '新增品項' : '編輯品項'}</h3>
+            <input id="item-name" placeholder="品名" value="${escapeHtml(editItem.name || '')}" style="text-align:left;letter-spacing:normal;margin-bottom:8px;" />
+            <input id="item-price" type="number" placeholder="價格" value="${editItem.price != null ? editItem.price : ''}" style="text-align:left;letter-spacing:normal;" />
+            <div class="pin-actions">
+              <button class="pill-button" style="flex:1;" data-action="item-cancel">取消</button>
+              <button data-action="item-save" style="flex:1;border:none;background:var(--pink);color:#fff;font-weight:900;padding:11px;border-radius:12px;">儲存</button>
+            </div>
+          </div></div>`;
+      }
+      if (editEnt) {
+        const defs = fieldDefs(editEnt.kind);
+        const kindLabel = { staff: '員工', ingredient: '食材', equipment: '設備', cost: '成本項目' }[editEnt.kind] || '';
+        html += `
+          <div class="pin-overlay"><div class="pin-box" style="max-width:360px;">
+            <h3 style="font-size:17px;font-weight:900;margin:0 0 14px;">${editEnt.isNew ? '新增' : '編輯'}${kindLabel}</h3>
+            ${defs.map(d => `<input id="ent-${d.key}" type="${d.type === 'number' ? 'number' : 'text'}" placeholder="${d.label}" value="${escapeHtml(editEnt.data[d.key] != null ? String(editEnt.data[d.key]) : '')}" style="text-align:left;letter-spacing:normal;margin-bottom:8px;" />`).join('')}
+            <div class="pin-actions">
+              <button class="pill-button" style="flex:1;" data-action="ent-cancel">取消</button>
+              <button data-action="ent-save" style="flex:1;border:none;background:var(--pink);color:#fff;font-weight:900;padding:11px;border-radius:12px;">儲存</button>
+            </div>
+          </div></div>`;
+      }
+      return html;
+    }
+
+    // ---------- 主渲染 ----------
+    function renderAdmin() {
+      const bodyFns = { revenue: tabRevenue, ops: tabOps, cost: tabCost, payroll: tabPayroll, ing: tabIng, equip: tabEquip, menu: tabMenu, history: tabHistory };
+      app.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+          <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);">📊 ${syncModeLabel()} · 自動更新</div>
+          <button id="logout-btn" class="pill-button">🔓 登出</button>
+        </div>
+        <div class="admin-tabs">${ADMIN_TABS.map(t => `<button class="admin-tab${t.k === aTab ? ' active' : ''}" data-tab="${t.k}">${t.label}</button>`).join('')}</div>
+        ${(bodyFns[aTab] || tabRevenue)()}
+        ${renderModals()}
+      `;
+      bindAdmin();
+    }
+
+    function bindAdmin() {
+      const logout = document.getElementById('logout-btn');
+      if (logout) logout.addEventListener('click', () => { if (auth) auth.signOut(); });
+      app.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { aTab = b.dataset.tab; renderAdmin(); }));
+      app.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => handleAction(b)));
+    }
+
+    function handleAction(b) {
+      const a = b.dataset.action;
+      const cat = b.dataset.cat, id = b.dataset.id, kind = b.dataset.kind;
+      if (a === 'hist-today') { histScope = 'today'; renderAdmin(); }
+      else if (a === 'hist-all') { histScope = 'all'; renderAdmin(); }
+      else if (a === 'item-active') { toggleItem(cat, id, 'active'); }
+      else if (a === 'item-sold') { toggleItem(cat, id, 'soldOut'); }
+      else if (a === 'item-del') { if (confirm('確定刪除此品項？')) deleteItem(cat, id); }
+      else if (a === 'item-edit') { const it = findItem(cat, id); editItem = { catId: cat, id, name: it.name, price: it.price, isNew: false }; renderAdmin(); }
+      else if (a === 'item-add') { editItem = { catId: cat, name: '', price: '', isNew: true }; renderAdmin(); }
+      else if (a === 'item-cancel') { editItem = null; renderAdmin(); }
+      else if (a === 'item-save') { saveItem(); }
+      else if (a === 'ent-add') { openEnt(kind, null); }
+      else if (a === 'ent-edit') { openEnt(kind, id); }
+      else if (a === 'ent-del') { if (confirm('確定刪除？')) deleteEnt(kind, id); }
+      else if (a === 'ent-cancel') { editEnt = null; renderAdmin(); }
+      else if (a === 'ent-save') { commitEnt(); }
+      else if (a === 'eq-cycle') { cycleStatus(id); }
+      else if (a === 'ing-plus') { adjustStock(id, 1); }
+      else if (a === 'ing-minus') { adjustStock(id, -1); }
+    }
+
+    // ---------- 菜單操作 ----------
+    function findItem(catId, id) { const c = cfg.menu.find(x => x.id === catId); return c ? c.items.find(i => i.id === id) : null; }
+    function toggleItem(catId, id, field) {
+      cfg.menu = cfg.menu.map(c => c.id !== catId ? c : Object.assign({}, c, { items: c.items.map(i => i.id !== id ? i : Object.assign({}, i, { [field]: !i[field] })) }));
+      saveMenu(cfg.menu); renderAdmin();
+    }
+    function deleteItem(catId, id) {
+      cfg.menu = cfg.menu.map(c => c.id !== catId ? c : Object.assign({}, c, { items: c.items.filter(i => i.id !== id) }));
+      saveMenu(cfg.menu); renderAdmin();
+    }
+    function saveItem() {
+      const name = (document.getElementById('item-name').value || '').trim();
+      const price = parseInt(document.getElementById('item-price').value, 10);
+      if (!name || !(price >= 0)) { showMessage('請填寫品名與價格'); return; }
+      if (editItem.isNew) {
+        const nid = 'x' + Date.now();
+        cfg.menu = cfg.menu.map(c => c.id !== editItem.catId ? c : Object.assign({}, c, { items: [...c.items, { id: nid, name, price, active: true, soldOut: false }] }));
+      } else {
+        cfg.menu = cfg.menu.map(c => c.id !== editItem.catId ? c : Object.assign({}, c, { items: c.items.map(i => i.id !== editItem.id ? i : Object.assign({}, i, { name, price })) }));
+      }
+      editItem = null; saveMenu(cfg.menu); renderAdmin();
+    }
+
+    // ---------- 營運資料操作 ----------
+    function openEnt(kind, id) {
+      const data = {};
+      const item = id ? (cfg.ent[entListKey(kind)] || []).find(x => x.id === id) : null;
+      fieldDefs(kind).forEach(d => { data[d.key] = item ? item[d.key] : ''; });
+      editEnt = { kind, id: id || null, isNew: !item, data };
+      renderAdmin();
+    }
+    function commitEnt() {
+      const defs = fieldDefs(editEnt.kind); const rec = {};
+      for (const d of defs) { let v = document.getElementById('ent-' + d.key).value; if (d.type === 'number') { v = parseFloat(v); if (isNaN(v)) v = 0; } else v = (v || '').trim(); rec[d.key] = v; }
+      if (!rec[defs[0].key]) { showMessage('請填寫' + defs[0].label); return; }
+      const lk = entListKey(editEnt.kind); const list = (cfg.ent[lk] || []).slice();
+      if (editEnt.isNew) { rec.id = editEnt.kind + Date.now(); if (editEnt.kind === 'equipment') rec.status = '正常'; list.push(rec); }
+      else { const i = list.findIndex(x => x.id === editEnt.id); if (i >= 0) list[i] = Object.assign({}, list[i], rec); }
+      cfg.ent = Object.assign({}, cfg.ent, { [lk]: list }); editEnt = null; saveEnt(cfg.ent); renderAdmin();
+    }
+    function deleteEnt(kind, id) {
+      const lk = entListKey(kind);
+      cfg.ent = Object.assign({}, cfg.ent, { [lk]: (cfg.ent[lk] || []).filter(x => x.id !== id) });
+      saveEnt(cfg.ent); renderAdmin();
+    }
+    function cycleStatus(id) {
+      const order = ['正常', '保養中', '維修中'];
+      cfg.ent = Object.assign({}, cfg.ent, { equipment: (cfg.ent.equipment || []).map(x => x.id !== id ? x : Object.assign({}, x, { status: order[(order.indexOf(x.status) + 1) % 3] })) });
+      saveEnt(cfg.ent); renderAdmin();
+    }
+    function adjustStock(id, delta) {
+      cfg.ent = Object.assign({}, cfg.ent, { ingredients: (cfg.ent.ingredients || []).map(x => x.id !== id ? x : Object.assign({}, x, { stock: Math.max(0, (x.stock || 0) + delta) })) });
+      saveEnt(cfg.ent); renderAdmin();
+    }
+
+    // ---------- 啟動 ----------
     if (auth) {
       auth.onAuthStateChanged(user => {
         unlocked = !!user;
-        if (unlocked) renderDashboard();
+        if (unlocked) renderAdmin();
         else renderLogin();
       });
     } else {
@@ -398,7 +831,12 @@
 
     initSync(list => {
       orders = list;
-      if (unlocked) renderDashboard();
+      if (unlocked && !editItem && !editEnt) renderAdmin();
+    });
+
+    initConfig(c => {
+      cfg = c;
+      if (unlocked && !editItem && !editEnt) renderAdmin();
     });
 
     if ('serviceWorker' in navigator) {

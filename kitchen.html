@@ -147,7 +147,7 @@
         if (order) {
           order.status = status; // 樂觀更新
           renderKitchen();
-          syncUpdateOrder(id, { status });
+          syncUpdateOrder(id, { status, updatedAt: Date.now() });
         }
       } else if (action === 'refresh') {
         renderKitchen();

@@ -62,6 +62,21 @@ function saveOrders(orders) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(orders));
 }
 
+// ===== 共用 Firebase 連線 =====
+function ensureDb() {
+  const hasConfig = typeof firebase !== 'undefined'
+    && typeof FIREBASE_CONFIG !== 'undefined'
+    && FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey;
+  if (!hasConfig) return null;
+  try {
+    if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+    return firebase.firestore();
+  } catch (e) {
+    console.warn('Firebase 初始化失敗', e);
+    return null;
+  }
+}
+
 // ===== 資料同步層：Firebase 雲端即時同步，localStorage 離線備援 =====
 // 線上（有設定 firebase-config.js）→ 跨裝置即時同步
 // 離線 / APK / 未設定 → 自動退回單機 localStorage
@@ -75,31 +90,22 @@ const SYNC = {
 // 註冊資料變更監聽；callback 會在初次與每次資料變動時被呼叫，帶入最新訂單陣列
 function initSync(onChange) {
   SYNC.onChange = onChange;
-
-  const hasConfig = typeof firebase !== 'undefined'
-    && typeof FIREBASE_CONFIG !== 'undefined'
-    && FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey;
-
-  if (hasConfig) {
-    try {
-      if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
-      SYNC.db = firebase.firestore();
-      SYNC.mode = 'cloud';
-      SYNC.db.collection('orders').orderBy('createdAt', 'asc').onSnapshot(
-        snap => {
-          const list = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
-          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch (e) {}
-          if (SYNC.onChange) SYNC.onChange(list);
-        },
-        err => {
-          console.warn('雲端同步中斷，改用本機模式', err);
-          startLocalSync();
-        }
-      );
-      return;
-    } catch (e) {
-      console.warn('Firebase 初始化失敗，改用本機模式', e);
-    }
+  const db = ensureDb();
+  if (db) {
+    SYNC.db = db;
+    SYNC.mode = 'cloud';
+    db.collection('orders').orderBy('createdAt', 'asc').onSnapshot(
+      snap => {
+        const list = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch (e) {}
+        if (SYNC.onChange) SYNC.onChange(list);
+      },
+      err => {
+        console.warn('雲端同步中斷，改用本機模式', err);
+        startLocalSync();
+      }
+    );
+    return;
   }
   startLocalSync();
 }
@@ -153,8 +159,114 @@ function syncModeLabel() {
   return SYNC.mode === 'cloud' ? '☁️ 雲端即時同步' : '🔄 本機儲存';
 }
 
+// ===== 營運設定同步層：菜單 + 員工/食材/設備/成本（Firestore doc config/admin，localStorage 備援）=====
+const DEFAULT_ENT = {
+  staff: [
+    { id: 'st1', name: '阿美', role: '內場煎台', wage: 200, hours: 176 },
+    { id: 'st2', name: '小宇', role: '外場收銀', wage: 185, hours: 160 },
+    { id: 'st3', name: '阿志', role: '外送兼職', wage: 183, hours: 88 },
+  ],
+  ingredients: [
+    { id: 'ig1', name: '白吐司', unit: '條', stock: 22, lowAt: 12, supplier: '義美食品' },
+    { id: 'ig2', name: '雞蛋', unit: '顆', stock: 180, lowAt: 80, supplier: '大成' },
+    { id: 'ig3', name: '豆漿', unit: '公升', stock: 9, lowAt: 10, supplier: '義美食品' },
+    { id: 'ig4', name: '起司片', unit: '片', stock: 95, lowAt: 50, supplier: '安佳' },
+    { id: 'ig5', name: '豬排', unit: '片', stock: 40, lowAt: 30, supplier: '卜蜂' },
+    { id: 'ig6', name: '紅茶葉', unit: '包', stock: 14, lowAt: 6, supplier: '立頓' },
+  ],
+  equipment: [
+    { id: 'eq1', name: '瓦斯煎台', status: '正常', lastService: '2026/05/18' },
+    { id: 'eq2', name: '冷藏冰箱', status: '保養中', lastService: '2026/06/10' },
+    { id: 'eq3', name: '飲料冷飲機', status: '正常', lastService: '2026/04/22' },
+    { id: 'eq4', name: '烤吐司機', status: '維修中', lastService: '2026/06/20' },
+    { id: 'eq5', name: 'POS 收銀機', status: '正常', lastService: '2026/03/30' },
+  ],
+  costs: [
+    { id: 'c1', label: '店租', amount: 42000 },
+    { id: 'c2', label: '食材進貨', amount: 56000 },
+    { id: 'c3', label: '水電瓦斯', amount: 13500 },
+    { id: 'c4', label: '耗材雜支', amount: 6800 },
+  ],
+};
+
+// 目前生效的菜單（會被設定同步更新）；預設用 MENU 並補上 active/soldOut 欄位
+let CURRENT_MENU = MENU.map(cat => Object.assign({}, cat, {
+  items: cat.items.map(it => Object.assign({ active: true, soldOut: false }, it)),
+}));
+
+const CONFIG_LS = 'xyg-config';
+const CONFIG = { db: null, mode: 'local', onChange: null, pollTimer: null, data: null };
+
+function defaultConfig() {
+  return { menu: CURRENT_MENU, ent: JSON.parse(JSON.stringify(DEFAULT_ENT)) };
+}
+
+function normalizeConfig(d) {
+  if (!d) d = defaultConfig();
+  d.menu = (d.menu && d.menu.length) ? d.menu : CURRENT_MENU;
+  d.ent = Object.assign({ staff: [], ingredients: [], equipment: [], costs: [] }, d.ent || {});
+  return d;
+}
+
+// 註冊營運設定變更監聽；callback 帶入 { menu, ent }
+function initConfig(onChange) {
+  CONFIG.onChange = onChange;
+  const db = ensureDb();
+  if (db) {
+    CONFIG.db = db;
+    CONFIG.mode = 'cloud';
+    db.collection('config').doc('admin').onSnapshot(
+      snap => {
+        let d = snap.exists ? snap.data() : null;
+        if (!d) { d = defaultConfig(); db.collection('config').doc('admin').set(d).catch(() => {}); }
+        d = normalizeConfig(d);
+        CONFIG.data = d;
+        CURRENT_MENU = d.menu;
+        if (CONFIG.onChange) CONFIG.onChange(d);
+      },
+      err => { console.warn('設定同步中斷，改用本機', err); startLocalConfig(); }
+    );
+    return;
+  }
+  startLocalConfig();
+}
+
+function startLocalConfig() {
+  CONFIG.mode = 'local';
+  const tick = () => {
+    let d = null;
+    try { d = JSON.parse(localStorage.getItem(CONFIG_LS) || 'null'); } catch (e) {}
+    d = normalizeConfig(d);
+    CONFIG.data = d;
+    CURRENT_MENU = d.menu;
+    if (CONFIG.onChange) CONFIG.onChange(d);
+  };
+  tick();
+  if (CONFIG.pollTimer) clearInterval(CONFIG.pollTimer);
+  CONFIG.pollTimer = setInterval(tick, 3000);
+}
+
+function saveConfig(data) {
+  data = normalizeConfig(data);
+  CONFIG.data = data;
+  CURRENT_MENU = data.menu;
+  if (CONFIG.mode === 'cloud' && CONFIG.db) {
+    return CONFIG.db.collection('config').doc('admin').set(data).catch(e => console.warn('設定儲存失敗', e));
+  }
+  try { localStorage.setItem(CONFIG_LS, JSON.stringify(data)); } catch (e) {}
+  if (CONFIG.onChange) CONFIG.onChange(data);
+  return Promise.resolve();
+}
+
+function saveMenu(menu) {
+  return saveConfig(Object.assign({}, CONFIG.data || defaultConfig(), { menu }));
+}
+function saveEnt(ent) {
+  return saveConfig(Object.assign({}, CONFIG.data || defaultConfig(), { ent }));
+}
+
 function getItem(itemId) {
-  return MENU.flatMap(cat => cat.items).find(item => item.id === itemId);
+  return CURRENT_MENU.flatMap(cat => cat.items).find(item => item.id === itemId);
 }
 
 function isToday(timestamp) {
