@@ -8,6 +8,10 @@
   <title>顧客點餐 - 小魚乾線上點餐系統</title>
   <style>
     /* 共用樣式由 shared.js 於頁尾注入 */
+    main {
+      padding-bottom: 88px;
+    }
+
     .menu-info {
       min-width: 0;
       flex: 1;
@@ -248,6 +252,7 @@
     const state = {
       cart: {},
       temp: {},
+      pending: {},
       diningType: '內用',
       tableInfo: '',
       note: '',
@@ -257,6 +262,10 @@
 
     function cartLines() {
       return Object.values(state.cart);
+    }
+
+    function pendingQty(id) {
+      return state.pending[id] || 1;
     }
 
     function cartCount() {
@@ -297,6 +306,7 @@
       `;
 
       attachEvents();
+      updateCartBar();
     }
 
     function renderMenuItem(category, item) {
@@ -310,8 +320,8 @@
         </div>`;
       }
       const temp = category.temp ? (state.temp[item.id] || '冷') : '';
-      const key = item.id + (temp ? '_' + temp : '');
-      const qty = state.cart[key] ? state.cart[key].qty : 0;
+      const qty = pendingQty(item.id);
+      const inCart = cartLines().filter(line => line.id === item.id).reduce((sum, line) => sum + line.qty, 0);
       const tempButtons = category.temp ? `
         <div class="temp-bar">
           ${['冷', '熱'].map(type => `
@@ -324,17 +334,17 @@
         <div class="card">
           <div class="menu-info">
             <div class="menu-title"><span>${item.name}</span><span class="menu-price">$${item.price}</span></div>
+            ${inCart ? `<div style="font-size:11px;color:var(--ink-soft);margin-top:3px;">🛒 購物車已有 ${inCart} 份</div>` : ''}
             ${tempButtons}
           </div>
-          ${qty === 0 ? `
-            <button class="button-primary" data-action="add-item" data-id="${item.id}" data-temp="${temp}">＋ 加入</button>
-          ` : `
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
             <div class="stepper">
-              <button class="circle-button" data-action="decrease-item" data-key="${key}">－</button>
+              <button class="circle-button" data-action="pending-dec" data-id="${item.id}">－</button>
               <div style="font-weight:900;min-width:18px;text-align:center">${qty}</div>
-              <button class="circle-button filled" data-action="add-item" data-id="${item.id}" data-temp="${temp}">＋</button>
+              <button class="circle-button filled" data-action="pending-inc" data-id="${item.id}">＋</button>
             </div>
-          `}
+            <button class="button-primary" data-action="add-to-cart" data-id="${item.id}" data-temp="${temp}" style="white-space:nowrap;">＋ 加入購物車</button>
+          </div>
         </div>
       `;
     }
@@ -450,10 +460,6 @@
       const noteInput = document.getElementById('note-input');
       if (tableInput) tableInput.addEventListener('input', e => state.tableInfo = e.target.value);
       if (noteInput) noteInput.addEventListener('input', e => state.note = e.target.value);
-      cartBar.addEventListener('click', () => {
-        state.cartOpen = !state.cartOpen;
-        renderCustomer();
-      });
     }
 
     function handleAction(event) {
@@ -462,13 +468,31 @@
       if (!action) return;
       event.stopPropagation();
 
-      if (action === 'add-item') {
+      if (action === 'pending-inc') {
+        const id = btn.dataset.id;
+        state.pending[id] = pendingQty(id) + 1;
+        renderCustomer();
+      } else if (action === 'pending-dec') {
+        const id = btn.dataset.id;
+        state.pending[id] = Math.max(1, pendingQty(id) - 1);
+        renderCustomer();
+      } else if (action === 'add-to-cart') {
+        const id = btn.dataset.id;
+        const temp = btn.dataset.temp;
+        const key = id + (temp ? '_' + temp : '');
+        const addQty = pendingQty(id);
+        state.cart[key] = state.cart[key] || { id, temp, qty: 0 };
+        state.cart[key].qty += addQty;
+        state.pending[id] = 1;
+        const mi = getItem(id);
+        showMessage(`已加入購物車：${mi ? mi.name : ''}${temp ? '（' + temp + '）' : ''} ×${addQty}`);
+        renderCustomer();
+      } else if (action === 'add-item') {
         const id = btn.dataset.id;
         const temp = btn.dataset.temp;
         const key = id + (temp ? '_' + temp : '');
         state.cart[key] = state.cart[key] || { id, temp, qty: 0 };
         state.cart[key].qty += 1;
-        state.cartOpen = true;
         renderCustomer();
       } else if (action === 'decrease-item') {
         const key = btn.dataset.key;
@@ -498,6 +522,7 @@
         state.currentOrderId = null;
         state.cart = {};
         state.temp = {};
+        state.pending = {};
         state.diningType = '內用';
         state.tableInfo = '';
         state.note = '';
@@ -531,10 +556,16 @@
       syncAddOrder(order);
       state.currentOrderId = order.id;
       state.cart = {};
+      state.pending = {};
       state.cartOpen = false;
       showMessage('訂單已送出');
       renderCustomer();
     }
+
+    cartBar.addEventListener('click', () => {
+      state.cartOpen = !state.cartOpen;
+      renderCustomer();
+    });
 
     renderCustomer();
     initSync(list => {
