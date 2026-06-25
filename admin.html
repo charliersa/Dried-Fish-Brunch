@@ -181,13 +181,21 @@
 
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script src="firebase-config.js"></script>
   <script src="shared.js"></script>
   <script>document.head.insertAdjacentHTML('beforeend', '<style>' + getSharedStyles() + '</style>');</script>
   <script>
     const app = document.getElementById('app');
     let orders = loadOrders();
-    let unlocked = sessionStorage.getItem('xyg-admin-unlocked') === '1';
+    let unlocked = false;
+
+    // Firebase 登入（管理後台需以管理員帳號登入）
+    const fbReady = typeof firebase !== 'undefined'
+      && typeof FIREBASE_CONFIG !== 'undefined'
+      && FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey;
+    if (fbReady && !firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+    const auth = fbReady ? firebase.auth() : null;
 
     // 建立 品項id -> 分類 對照
     const ITEM_CAT = {};
@@ -202,38 +210,53 @@
       `;
     }
 
-    function renderLock() {
+    function renderLogin(errMsg) {
       app.innerHTML = `
         <div class="pin-overlay">
           <div class="pin-box">
             <div style="font-size:34px;">🔐</div>
-            <h3 style="font-size:18px;font-weight:900;margin:6px 0 2px;">管理後台</h3>
-            <div style="font-size:13px;color:var(--ink-soft);margin-bottom:16px;">輸入管理密碼以查看營業數據</div>
-            <input id="pin-input" type="password" inputmode="numeric" placeholder="密碼" autocomplete="off" />
-            <div id="pin-err" class="pin-err" style="display:none;">密碼錯誤，請再試一次</div>
+            <h3 style="font-size:18px;font-weight:900;margin:6px 0 2px;">管理後台登入</h3>
+            <div style="font-size:13px;color:var(--ink-soft);margin-bottom:16px;">請以管理員帳號登入以查看營業數據</div>
+            <input id="login-email" type="email" placeholder="Email" autocomplete="username" style="text-align:left;letter-spacing:normal;margin-bottom:8px;" />
+            <input id="login-pw" type="password" placeholder="密碼" autocomplete="current-password" style="text-align:left;letter-spacing:normal;" />
+            <div id="login-err" class="pin-err" style="display:${errMsg ? 'block' : 'none'};">${errMsg || ''}</div>
             <div class="pin-actions">
               <a href="customer.html" style="flex:1;border:1.5px solid var(--line);background:#fff;color:var(--ink-soft);font-weight:700;padding:11px;border-radius:12px;text-decoration:none;display:flex;align-items:center;justify-content:center;">返回</a>
-              <button id="pin-submit" style="background:var(--pink);color:#fff;">進入</button>
+              <button id="login-submit" style="background:var(--pink);color:#fff;">登入</button>
             </div>
           </div>
         </div>
       `;
-      const input = document.getElementById('pin-input');
-      const err = document.getElementById('pin-err');
+      const email = document.getElementById('login-email');
+      const pw = document.getElementById('login-pw');
+      const btn = document.getElementById('login-submit');
       const submit = () => {
-        if (input.value === ADMIN_PIN) {
-          unlocked = true;
-          sessionStorage.setItem('xyg-admin-unlocked', '1');
-          startDashboard();
-        } else {
-          err.style.display = 'block';
-          input.value = '';
-          input.focus();
-        }
+        if (!auth) { renderLogin('目前無法連線，請檢查網路後再試'); return; }
+        if (!email.value.trim() || !pw.value) { renderLogin('請輸入 Email 與密碼'); return; }
+        btn.disabled = true;
+        btn.textContent = '登入中…';
+        auth.signInWithEmailAndPassword(email.value.trim(), pw.value)
+          .catch(() => renderLogin('帳號或密碼錯誤'));
+        // 成功會由 onAuthStateChanged 接手切換到儀表板
       };
-      document.getElementById('pin-submit').addEventListener('click', submit);
-      input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
-      input.focus();
+      btn.addEventListener('click', submit);
+      pw.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+      email.focus();
+    }
+
+    function renderOffline() {
+      app.innerHTML = `
+        <div class="pin-overlay">
+          <div class="pin-box">
+            <div style="font-size:34px;">📡</div>
+            <h3 style="font-size:18px;font-weight:900;margin:6px 0 2px;">需要連線</h3>
+            <div style="font-size:13px;color:var(--ink-soft);margin-bottom:16px;">管理後台需要連線並登入才能使用</div>
+            <div class="pin-actions">
+              <a href="customer.html" style="flex:1;border:1.5px solid var(--line);background:#fff;color:var(--ink-soft);font-weight:700;padding:11px;border-radius:12px;text-decoration:none;display:flex;align-items:center;justify-content:center;">返回</a>
+            </div>
+          </div>
+        </div>
+      `;
     }
 
     function barChart(rows, fmt) {
@@ -316,7 +339,7 @@
       app.innerHTML = `
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
           <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);">📊 營業數據 · 每 4 秒自動更新</div>
-          <button id="logout-btn" class="pill-button">🔓 鎖定</button>
+          <button id="logout-btn" class="pill-button">🔓 登出</button>
         </div>
         <div class="stats-grid">
           ${renderStat('今日營收', '$' + revenue, 'var(--green)')}
@@ -359,20 +382,18 @@
       `;
 
       document.getElementById('logout-btn').addEventListener('click', () => {
-        unlocked = false;
-        sessionStorage.removeItem('xyg-admin-unlocked');
-        renderLock();
+        if (auth) auth.signOut();
       });
     }
 
-    function startDashboard() {
-      renderDashboard();
-    }
-
-    if (unlocked) {
-      startDashboard();
+    if (auth) {
+      auth.onAuthStateChanged(user => {
+        unlocked = !!user;
+        if (unlocked) renderDashboard();
+        else renderLogin();
+      });
     } else {
-      renderLock();
+      renderOffline();
     }
 
     initSync(list => {

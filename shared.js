@@ -49,7 +49,6 @@ const MENU = [
 ];
 
 const STORAGE_KEY = 'xyg-order-system';
-const ADMIN_PIN = '2026';
 
 function loadOrders() {
   try {
