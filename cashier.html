@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#1c5e7a" />
+  <link rel="manifest" href="manifest.json" />
+  <title>外場收銀 - 小魚乾線上點餐系統</title>
+  <style>
+    /* 共用樣式由 shared.js 於頁尾注入 */
+    .summary-card {
+      background: #fff;
+      border-radius: 18px;
+      padding: 16px;
+      margin-top: 14px;
+    }
+
+    .summary-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-weight: 900;
+      border-top: 1px solid var(--line);
+      margin-top: 8px;
+      padding-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="top-row">
+        <div class="brand">
+          <div class="brand-logo">🐟</div>
+          <div class="brand-text">
+            <h1>小魚乾早午餐</h1>
+            <p>DRIED FISH BRUNCH</p>
+          </div>
+        </div>
+        <div class="info-chip">⏰ 6:00–12:00</div>
+      </div>
+      <div class="address">📍 台南市東區長東街 106 號 · 現點現做，請耐心等候</div>
+      <div class="nav-pills">
+        <a href="customer.html">🍽️ 顧客點餐</a>
+        <a href="kitchen.html">👨‍🍳 廚房後台</a>
+        <a href="cashier.html" style="background:#fff;color:var(--ink);">💰 外場收銀</a>
+        <a href="display.html">📺 叫號螢幕</a>
+        <a href="admin.html">🔒 管理後台</a>
+      </div>
+    </header>
+    <main id="app"></main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="shared.js"></script>
+  <script>document.head.insertAdjacentHTML('beforeend', '<style>' + getSharedStyles() + '</style>');</script>
+  <script>
+    const app = document.getElementById('app');
+    let orders = loadOrders();
+
+    function renderCashier() {
+      const todayOrders = orders.filter(order => isToday(order.createdAt));
+      const paid = todayOrders.filter(order => order.status === 'done');
+      const unpaid = todayOrders.filter(order => order.status !== 'done');
+      
+      const totalRevenue = paid.reduce((sum, order) => sum + order.total, 0);
+      const totalPending = unpaid.reduce((sum, order) => sum + order.total, 0);
+
+      const cardsHtml = todayOrders.length === 0 ?
+        '<div class="stat-card" style="grid-column:1/-1;">目前沒有訂單。</div>' :
+        `<div class="order-grid">${todayOrders.map(order => renderCashierCard(order)).join('')}</div>`;
+
+      app.innerHTML = `
+        <div class="stats-grid">
+          ${renderStat('今日訂單', todayOrders.length)}
+          ${renderStat('未取餐', unpaid.length, 'var(--amber)')}
+          ${renderStat('已取餐', paid.length, 'var(--green)')}
+          ${renderStat('應收金額', '$' + totalPending, 'var(--pink)')}
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+          <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);">💰 營收統計</div>
+          <div>總營收: <span style="font-weight:900;color:var(--green);">$${totalRevenue}</span></div>
+        </div>
+        ${cardsHtml}
+      `;
+
+      attachEvents();
+    }
+
+    function renderStat(label, value, color) {
+      return `
+        <div class="stat-card">
+          <div style="font-size:24px;font-weight:900;color:${color || 'var(--ink)'};">${value}</div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">${label}</div>
+        </div>
+      `;
+    }
+
+    function renderCashierCard(order) {
+      const statusMap = {
+        new: { label: '新訂單', color: 'var(--amber)' },
+        cook: { label: '製作中', color: 'var(--blue)' },
+        done: { label: '已完成', color: 'var(--green)' },
+      };
+      const status = statusMap[order.status];
+
+      const itemsHtml = order.items.map(item => `
+        <div style="display:flex;align-items:center;justify-content:space-between;font-size:13px;padding:2px 0;">
+          <span>${item.name}${item.temp ? `（${item.temp}）` : ''} ×${item.qty}</span>
+          <span>$${item.price * item.qty}</span>
+        </div>
+      `).join('');
+
+      return `
+        <div class="order-card" style="border-top-color:${status.color};">
+          <div class="order-head">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span style="font-size:20px;font-weight:900;color:var(--pink);">${order.no}</span>
+              <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:${status.color.replace('var(', 'rgba(').replace(')', ',.15)')};color:${status.color};">${status.label}</span>
+            </div>
+            <span style="font-size:11px;color:var(--ink-soft);">${new Date(order.createdAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+          </div>
+          <div class="order-meta">
+            <span>${order.type}</span>
+            <span>·</span>
+            <span>${escapeHtml(order.table)}</span>
+          </div>
+          <div class="order-items">
+            ${itemsHtml}
+            ${order.note ? `<div class="order-note">📝 ${escapeHtml(order.note)}</div>` : ''}
+          </div>
+          <div class="order-footer">
+            <span style="font-weight:900;color:var(--pink);">$${order.total}</span>
+            ${order.status === 'done' 
+              ? `<span style="font-weight:700;color:var(--green);">✔️ 已完成</span>`
+              : `<button class="button-primary" style="background:var(--green);" data-action="mark-done" data-id="${order.id}">✔️ 標記完成</button>`
+            }
+          </div>
+        </div>
+      `;
+    }
+
+    function attachEvents() {
+      app.querySelectorAll('[data-action]').forEach(btn => btn.addEventListener('click', handleAction));
+    }
+
+    function handleAction(event) {
+      const btn = event.currentTarget;
+      const action = btn.dataset.action;
+      if (!action) return;
+
+      if (action === 'mark-done') {
+        const id = btn.dataset.id;
+        const order = orders.find(o => o.id === id);
+        if (order && order.status !== 'done') {
+          order.status = 'done'; // 樂觀更新
+          renderCashier();
+          syncUpdateOrder(id, { status: 'done' });
+        }
+      }
+    }
+
+    renderCashier();
+    initSync(list => {
+      orders = list;
+      renderCashier();
+    });
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service Worker failed:', err));
+    }
+  </script>
+</body>
+</html>

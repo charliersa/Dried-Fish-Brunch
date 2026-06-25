@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#1c5e7a" />
+  <link rel="manifest" href="manifest.json" />
+  <title>叫號螢幕 - 小魚乾線上點餐系統</title>
+  <style>
+    /* 共用樣式由 shared.js 於頁尾注入 */
+    body {
+      padding-bottom: 0;
+    }
+
+    main {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 0;
+    }
+
+    .display-container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: center;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #fff;
+      overflow: hidden;
+    }
+
+    .display-header {
+      padding: 20px;
+      text-align: center;
+    }
+
+    .display-header h1 {
+      margin: 0;
+      font-size: 32px;
+      font-weight: 900;
+    }
+
+    .display-header p {
+      margin: 4px 0 0;
+      font-size: 16px;
+      opacity: .9;
+    }
+
+    .display-main {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+
+    .order-number {
+      font-size: 180px;
+      font-weight: 900;
+      letter-spacing: 20px;
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .7; }
+    }
+
+    .order-info {
+      position: absolute;
+      top: 80px;
+      left: 0;
+      right: 0;
+      font-size: 24px;
+      font-weight: 700;
+      opacity: .9;
+    }
+
+    .completed-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 10px;
+      padding: 20px;
+      max-width: 1200px;
+      width: 100%;
+    }
+
+    .completed-number {
+      background: rgba(255, 255, 255, .2);
+      border-radius: 12px;
+      padding: 16px;
+      font-size: 32px;
+      font-weight: 900;
+      border: 2px solid rgba(255, 255, 255, .5);
+      animation: slideIn .3s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .empty-message {
+      font-size: 36px;
+      opacity: .8;
+    }
+  </style>
+</head>
+<body>
+  <main id="display"></main>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="shared.js"></script>
+  <script>document.head.insertAdjacentHTML('beforeend', '<style>' + getSharedStyles() + '</style>');</script>
+  <script>
+    const display = document.getElementById('display');
+    let orders = loadOrders();
+    let lastCompleted = null;
+
+    function getCompletedToday() {
+      return orders.filter(order => isToday(order.createdAt) && order.status === 'done');
+    }
+
+    function renderDisplay() {
+      const todayCompleted = getCompletedToday();
+      
+      if (todayCompleted.length === 0) {
+        display.innerHTML = `
+          <div class="display-container">
+            <div class="display-header">
+              <h1>🐟 小魚乾早午餐</h1>
+              <p>DRIED FISH BRUNCH</p>
+            </div>
+            <div class="display-main">
+              <div class="empty-message">等待訂單中...</div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      const latestCompleted = todayCompleted[todayCompleted.length - 1];
+      const otherCompleted = todayCompleted.slice(0, -1);
+
+      // 如果有新完成的訂單，播放提示音
+      if (lastCompleted !== latestCompleted.id && typeof Audio !== 'undefined') {
+        try {
+          const beep = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAAB9AAACABAAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj==');
+          beep.play().catch(() => {});
+        } catch (e) {}
+      }
+      lastCompleted = latestCompleted.id;
+
+      display.innerHTML = `
+        <div class="display-container">
+          <div class="display-header">
+            <h1>🐟 小魚乾早午餐</h1>
+            <p>DRIED FISH BRUNCH</p>
+          </div>
+          <div class="display-main">
+            <div class="order-info">${latestCompleted.type} · ${escapeHtml(latestCompleted.table)}</div>
+            <div class="order-number">${latestCompleted.no}</div>
+          </div>
+          <div class="completed-list">
+            ${otherCompleted.map(order => `<div class="completed-number">${order.no}</div>`).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    renderDisplay();
+    initSync(list => {
+      orders = list;
+      renderDisplay();
+    });
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service Worker failed:', err));
+    }
+  </script>
+</body>
+</html>

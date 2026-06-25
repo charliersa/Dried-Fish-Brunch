@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#1c5e7a" />
+  <link rel="manifest" href="manifest.json" />
+  <title>管理後台 - 小魚乾線上點餐系統</title>
+  <style>
+    /* 共用樣式由 shared.js 於頁尾注入 */
+    .admin-card {
+      background: #fff;
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 2px 6px rgba(28, 94, 122, .06);
+      margin-bottom: 14px;
+    }
+
+    .admin-card h3 {
+      margin: 0 0 14px;
+      font-size: 15px;
+      font-weight: 900;
+    }
+
+    .admin-cols {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+    }
+
+    .bar-chart {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      height: 140px;
+    }
+
+    .bar-chart .bar-col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      height: 100%;
+    }
+
+    .bar-chart .bar {
+      width: 100%;
+      max-width: 34px;
+      border-radius: 6px 6px 0 0;
+      background: linear-gradient(180deg, #6fb7d0, #3e9bd1);
+      min-height: 2px;
+      transition: height .3s ease;
+    }
+
+    .bar-val {
+      font-size: 10px;
+      color: var(--ink-soft);
+      margin-bottom: 4px;
+    }
+
+    .bar-label {
+      font-size: 11px;
+      color: #9db4bf;
+      margin-top: 6px;
+    }
+
+    .rank-row {
+      margin-bottom: 11px;
+    }
+
+    .rank-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+
+    .rank-head b {
+      font-weight: 700;
+    }
+
+    .rank-track {
+      background: #eef5f8;
+      border-radius: 4px;
+      height: 8px;
+      overflow: hidden;
+    }
+
+    .rank-fill {
+      height: 100%;
+      border-radius: 4px;
+      background: linear-gradient(90deg, #ec6398, #d84b84);
+    }
+
+    /* PIN 鎖畫面 */
+    .pin-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(20, 50, 65, .5);
+      z-index: 60;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .pin-box {
+      background: #fff;
+      border-radius: 20px;
+      padding: 24px;
+      width: 100%;
+      max-width: 340px;
+      box-shadow: 0 12px 34px rgba(0, 0, 0, .22);
+      text-align: center;
+    }
+
+    .pin-box input {
+      width: 100%;
+      box-sizing: border-box;
+      text-align: center;
+      letter-spacing: 6px;
+      border: 1.5px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 18px;
+      color: var(--ink);
+      outline: none;
+    }
+
+    .pin-err {
+      font-size: 13px;
+      color: #e5534b;
+      font-weight: 700;
+      margin-top: 8px;
+    }
+
+    .pin-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .pin-actions button {
+      flex: 1;
+      cursor: pointer;
+      font-weight: 900;
+      padding: 11px;
+      border-radius: 12px;
+      border: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="top-row">
+        <div class="brand">
+          <div class="brand-logo">🐟</div>
+          <div class="brand-text">
+            <h1>小魚乾早午餐</h1>
+            <p>DRIED FISH BRUNCH</p>
+          </div>
+        </div>
+        <div class="info-chip">⏰ 6:00–12:00</div>
+      </div>
+      <div class="address">📍 台南市東區長東街 106 號 · 現點現做，請耐心等候</div>
+      <div class="nav-pills">
+        <a href="customer.html">🍽️ 顧客點餐</a>
+        <a href="kitchen.html">👨‍🍳 廚房後台</a>
+        <a href="cashier.html">💰 外場收銀</a>
+        <a href="display.html">📺 叫號螢幕</a>
+        <a href="admin.html" style="background:#fff;color:var(--ink);">🔒 管理後台</a>
+      </div>
+    </header>
+    <main id="app"></main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="shared.js"></script>
+  <script>document.head.insertAdjacentHTML('beforeend', '<style>' + getSharedStyles() + '</style>');</script>
+  <script>
+    const app = document.getElementById('app');
+    let orders = loadOrders();
+    let unlocked = sessionStorage.getItem('xyg-admin-unlocked') === '1';
+
+    // 建立 品項id -> 分類 對照
+    const ITEM_CAT = {};
+    MENU.forEach(cat => cat.items.forEach(item => { ITEM_CAT[item.id] = cat; }));
+
+    function renderStat(label, value, color) {
+      return `
+        <div class="stat-card">
+          <div style="font-size:24px;font-weight:900;color:${color || 'var(--ink)'};">${value}</div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">${label}</div>
+        </div>
+      `;
+    }
+
+    function renderLock() {
+      app.innerHTML = `
+        <div class="pin-overlay">
+          <div class="pin-box">
+            <div style="font-size:34px;">🔐</div>
+            <h3 style="font-size:18px;font-weight:900;margin:6px 0 2px;">管理後台</h3>
+            <div style="font-size:13px;color:var(--ink-soft);margin-bottom:16px;">輸入管理密碼以查看營業數據</div>
+            <input id="pin-input" type="password" inputmode="numeric" placeholder="密碼" autocomplete="off" />
+            <div id="pin-err" class="pin-err" style="display:none;">密碼錯誤，請再試一次</div>
+            <div class="pin-actions">
+              <a href="customer.html" style="flex:1;border:1.5px solid var(--line);background:#fff;color:var(--ink-soft);font-weight:700;padding:11px;border-radius:12px;text-decoration:none;display:flex;align-items:center;justify-content:center;">返回</a>
+              <button id="pin-submit" style="background:var(--pink);color:#fff;">進入</button>
+            </div>
+          </div>
+        </div>
+      `;
+      const input = document.getElementById('pin-input');
+      const err = document.getElementById('pin-err');
+      const submit = () => {
+        if (input.value === ADMIN_PIN) {
+          unlocked = true;
+          sessionStorage.setItem('xyg-admin-unlocked', '1');
+          startDashboard();
+        } else {
+          err.style.display = 'block';
+          input.value = '';
+          input.focus();
+        }
+      };
+      document.getElementById('pin-submit').addEventListener('click', submit);
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+      input.focus();
+    }
+
+    function barChart(rows, fmt) {
+      const max = Math.max(1, ...rows.map(r => r.value));
+      return `<div class="bar-chart">${rows.map(r => `
+        <div class="bar-col">
+          <div class="bar-val">${fmt ? fmt(r.value) : r.value}</div>
+          <div class="bar" style="height:${Math.round(r.value / max * 100)}%;"></div>
+          <div class="bar-label">${r.label}</div>
+        </div>`).join('')}</div>`;
+    }
+
+    function rankList(rows, fmt, emptyText) {
+      if (rows.length === 0) {
+        return `<div style="color:#9db4bf;font-size:14px;padding:10px 0;">${emptyText}</div>`;
+      }
+      const max = Math.max(1, ...rows.map(r => r.value));
+      return rows.map(r => `
+        <div class="rank-row">
+          <div class="rank-head"><b>${escapeHtml(r.name)}</b><span style="color:var(--ink-soft);">${fmt(r.value)}</span></div>
+          <div class="rank-track"><div class="rank-fill" style="width:${Math.round(r.value / max * 100)}%;"></div></div>
+        </div>
+      `).join('');
+    }
+
+    function renderDashboard() {
+      const today = orders.filter(o => isToday(o.createdAt));
+      const done = today.filter(o => o.status === 'done');
+      const pending = today.length - done.length;
+      const revenue = done.reduce((sum, o) => sum + (o.total || 0), 0);
+      const avg = done.length ? Math.round(revenue / done.length) : 0;
+
+      // 今日分類營收（以已完成訂單計）
+      const catMap = {};
+      done.forEach(o => (o.items || []).forEach(it => {
+        const menuItem = getItem(it.id);
+        const cat = ITEM_CAT[it.id];
+        if (!menuItem || !cat) return;
+        catMap[cat.id] = catMap[cat.id] || { name: cat.icon + ' ' + cat.name, value: 0 };
+        catMap[cat.id].value += menuItem.price * it.qty;
+      }));
+      const catRows = Object.values(catMap).sort((a, b) => b.value - a.value);
+
+      // 今日熱銷排行（以全部今日訂單份數計）
+      const itemMap = {};
+      today.forEach(o => (o.items || []).forEach(it => {
+        const menuItem = getItem(it.id);
+        if (!menuItem) return;
+        itemMap[it.id] = itemMap[it.id] || { name: menuItem.name, value: 0 };
+        itemMap[it.id].value += it.qty;
+      }));
+      const topRows = Object.values(itemMap).sort((a, b) => b.value - a.value).slice(0, 6);
+
+      // 內用 / 外帶 分布
+      const dineIn = today.filter(o => o.type === '內用').length;
+      const takeout = today.length - dineIn;
+
+      // 營業時段分布（今日訂單數，依小時）
+      const hourMap = {};
+      today.forEach(o => {
+        const h = new Date(o.createdAt).getHours();
+        hourMap[h] = (hourMap[h] || 0) + 1;
+      });
+      const hours = Object.keys(hourMap).map(Number).sort((a, b) => a - b);
+      const hourRows = hours.map(h => ({ label: h + ':00', value: hourMap[h] }));
+
+      // 近 7 日營收（已完成訂單）
+      const dayRows = [];
+      const now = new Date();
+      const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+        const key = d.toLocaleDateString('zh-TW');
+        const sum = orders
+          .filter(o => o.status === 'done' && new Date(o.createdAt).toLocaleDateString('zh-TW') === key)
+          .reduce((s, o) => s + (o.total || 0), 0);
+        dayRows.push({ label: '週' + weekdays[d.getDay()], value: sum });
+      }
+
+      app.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+          <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);">📊 營業數據 · 每 4 秒自動更新</div>
+          <button id="logout-btn" class="pill-button">🔓 鎖定</button>
+        </div>
+        <div class="stats-grid">
+          ${renderStat('今日營收', '$' + revenue, 'var(--green)')}
+          ${renderStat('今日訂單', today.length)}
+          ${renderStat('平均客單價', '$' + avg, 'var(--pink)')}
+          ${renderStat('未取餐', pending, 'var(--amber)')}
+        </div>
+
+        <div class="admin-card">
+          <h3>近 7 日營收</h3>
+          ${barChart(dayRows, v => '$' + v)}
+        </div>
+
+        <div class="admin-cols">
+          <div class="admin-card">
+            <h3>今日分類營收</h3>
+            ${rankList(catRows, v => '$' + v, '今天還沒有完成的訂單')}
+          </div>
+          <div class="admin-card">
+            <h3>今日熱銷排行</h3>
+            ${rankList(topRows, v => v + ' 份', '今天還沒有銷售紀錄')}
+          </div>
+          <div class="admin-card">
+            <h3>內用 / 外帶分布</h3>
+            ${rankList(
+              [
+                { name: '🍽️ 內用', value: dineIn },
+                { name: '🛍️ 外帶', value: takeout },
+              ].filter(r => r.value > 0),
+              v => v + ' 筆',
+              '今天還沒有訂單'
+            )}
+          </div>
+        </div>
+
+        <div class="admin-card">
+          <h3>營業時段分布（今日訂單數）</h3>
+          ${hourRows.length ? barChart(hourRows) : '<div style="color:#9db4bf;font-size:14px;padding:10px 0;">今天還沒有訂單</div>'}
+        </div>
+      `;
+
+      document.getElementById('logout-btn').addEventListener('click', () => {
+        unlocked = false;
+        sessionStorage.removeItem('xyg-admin-unlocked');
+        renderLock();
+      });
+    }
+
+    function startDashboard() {
+      renderDashboard();
+    }
+
+    if (unlocked) {
+      startDashboard();
+    } else {
+      renderLock();
+    }
+
+    initSync(list => {
+      orders = list;
+      if (unlocked) renderDashboard();
+    });
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service Worker failed:', err));
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#1c5e7a" />
+  <link rel="manifest" href="manifest.json" />
+  <title>廚房後台 - 小魚乾線上點餐系統</title>
+  <style>
+    /* 共用樣式由 shared.js 於頁尾注入 */
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="top-row">
+        <div class="brand">
+          <div class="brand-logo">🐟</div>
+          <div class="brand-text">
+            <h1>小魚乾早午餐</h1>
+            <p>DRIED FISH BRUNCH</p>
+          </div>
+        </div>
+        <div class="info-chip">⏰ 6:00–12:00</div>
+      </div>
+      <div class="address">📍 台南市東區長東街 106 號 · 現點現做，請耐心等候</div>
+      <div class="nav-pills">
+        <a href="customer.html">🍽️ 顧客點餐</a>
+        <a href="kitchen.html" style="background:#fff;color:var(--ink);">👨‍🍳 廚房後台</a>
+        <a href="cashier.html">💰 外場收銀</a>
+        <a href="display.html">📺 叫號螢幕</a>
+        <a href="admin.html">🔒 管理後台</a>
+      </div>
+    </header>
+    <main id="app"></main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="shared.js"></script>
+  <script>document.head.insertAdjacentHTML('beforeend', '<style>' + getSharedStyles() + '</style>');</script>
+  <script>
+    const app = document.getElementById('app');
+    let orders = loadOrders();
+
+    function renderKitchen() {
+      const todayOrders = orders.filter(order => isToday(order.createdAt));
+      const active = todayOrders.filter(order => order.status !== 'done');
+      const doneOrders = todayOrders.filter(order => order.status === 'done');
+      const stats = {
+        total: todayOrders.length,
+        new: active.filter(order => order.status === 'new').length,
+        cook: active.filter(order => order.status === 'cook').length,
+        revenue: doneOrders.reduce((sum, order) => sum + order.total, 0),
+      };
+
+      const cardsHtml = todayOrders.length === 0 ?
+        '<div class="stat-card" style="grid-column:1/-1;">目前沒有待處理的訂單，請等待顧客下單。</div>' :
+        `<div class="order-grid">${todayOrders.map(order => renderKitchenCard(order)).join('')}</div>`;
+
+      app.innerHTML = `
+        <div class="stats-grid">
+          ${renderStat('今日訂單', stats.total)}
+          ${renderStat('待製作', stats.new, 'var(--amber)')}
+          ${renderStat('製作中', stats.cook, 'var(--blue)')}
+          ${renderStat('已完成營收', '$' + stats.revenue, 'var(--green)')}
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+          <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);">${syncModeLabel()} · 自動更新</div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <button class="pill-button" data-action="refresh" style="cursor:pointer;">重新整理</button>
+            <button class="pill-button" data-action="clear-orders" style="cursor:pointer;">清除全部</button>
+          </div>
+        </div>
+        ${cardsHtml}
+      `;
+
+      attachEvents();
+    }
+
+    function renderStat(label, value, color) {
+      return `
+        <div class="stat-card">
+          <div style="font-size:24px;font-weight:900;color:${color || 'var(--ink)'};">${value}</div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">${label}</div>
+        </div>
+      `;
+    }
+
+    function renderKitchenCard(order) {
+      const statusMap = {
+        new: { label: '新訂單', color: 'var(--amber)', bg: 'var(--pink-bg)' },
+        cook: { label: '製作中', color: 'var(--blue)', bg: 'var(--blue-bg)' },
+        done: { label: '完成', color: 'var(--green)', bg: 'var(--green-bg)' },
+      };
+      const status = statusMap[order.status];
+      const actionButton = order.status === 'new'
+        ? `<button class="button-primary" style="background:var(--blue);" data-action="change-status" data-id="${order.id}" data-status="cook">👨‍🍳 開始製作</button>`
+        : order.status === 'cook'
+          ? `<button class="button-primary" style="background:var(--green);" data-action="change-status" data-id="${order.id}" data-status="done">✔️ 完成</button>`
+          : `<button class="button-primary" style="background:#9db4bf;">已完成</button>`;
+
+      return `
+        <div class="order-card" style="border-top-color:${status.color};">
+          <div class="order-head">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span style="font-size:22px;font-weight:900;color:var(--pink);">${order.no}</span>
+              <span style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;background:${status.bg};color:${status.color};">${status.label}</span>
+            </div>
+            <span style="font-size:12px;color:var(--ink-soft);">${new Date(order.createdAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+          </div>
+          <div class="order-meta">
+            <span>${order.type}</span>
+            <span>·</span>
+            <span>${escapeHtml(order.table)}</span>
+          </div>
+          <div class="order-items">
+            ${order.items.map(item => `
+              <div class="item-row"><span>${item.name}${item.temp ? `（${item.temp}）` : ''}</span><span>×${item.qty}</span></div>
+            `).join('')}
+            ${order.note ? `<div class="order-note">📝 ${escapeHtml(order.note)}</div>` : ''}
+          </div>
+          <div class="order-footer">
+            <span style="font-weight:800;color:var(--pink);">$${order.total}</span>
+            ${actionButton}
+          </div>
+        </div>
+      `;
+    }
+
+    function attachEvents() {
+      app.querySelectorAll('[data-action]').forEach(btn => btn.addEventListener('click', handleAction));
+    }
+
+    function handleAction(event) {
+      const btn = event.currentTarget;
+      const action = btn.dataset.action;
+      if (!action) return;
+
+      if (action === 'change-status') {
+        const id = btn.dataset.id;
+        const status = btn.dataset.status;
+        const order = orders.find(o => o.id === id);
+        if (order) {
+          order.status = status; // 樂觀更新
+          renderKitchen();
+          syncUpdateOrder(id, { status });
+        }
+      } else if (action === 'refresh') {
+        renderKitchen();
+      } else if (action === 'clear-orders') {
+        if (confirm('確定要清除全部訂單嗎？')) {
+          syncClearOrders();
+        }
+      }
+    }
+
+    renderKitchen();
+    initSync(list => {
+      orders = list;
+      renderKitchen();
+    });
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service Worker failed:', err));
+    }
+  </script>
+</body>
+</html>
