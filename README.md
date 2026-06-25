@@ -10,7 +10,7 @@
 | kitchen.html | 廚房後台 |
 | cashier.html | 外場收銀 |
 | display.html | 叫號螢幕 |
-| admin.html | 管理後台（密碼 2026） |
+| admin.html | 管理後台（需管理密碼） |
 | shared.js | 共用資料 / 樣式 / 同步邏輯 |
 | firebase-config.js | Firebase 設定（填了才會跨裝置同步；沒填＝單機模式） |
 | manifest.json / sw.js | PWA（可安裝、可離線） |
