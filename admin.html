@@ -395,7 +395,7 @@
     const priceOf = it => (it.price != null ? it.price : (getItem(it.id) ? getItem(it.id).price : 0));
     const dayKey = ts => { const d = new Date(ts); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
     // 預設 Google Sheet 同步網址（Apps Script Web App）；後台欄位有填則以欄位為準
-    const DEFAULT_SHEET_URL = 'https://script.google.com/macros/s/AKfycbxbw2k5WKN2r1CCiteqBZKtrlZ8YTzTzGv6GJbpqtq7vw5MODTyMXAQZowYjqPCrtSk/exec';
+    const DEFAULT_SHEET_URL = 'https://script.google.com/macros/s/AKfycbypiqr7vxWzpMQCNdp_jSv61f5UtoUHE8I4lvgy8Z6nilN-eg3bM8jZ-yxCeGzgwNem/exec';
 
     // 整理某一天的報表資料（訂單明細 + 金額合計 + 現金/行動分類 + 品項統計）
     function buildReportData(dateStr) {
