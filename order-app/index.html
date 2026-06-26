@@ -410,12 +410,6 @@
       app.innerHTML = `
         <button class="button-primary" data-action="toggle-board" style="width:100%;justify-content:center;margin-bottom:12px;background:#fff;color:var(--pink-deep);border:2px solid var(--pink);font-weight:800;">📺 ${state.showBoard ? '收起叫號板' : '查看叫號板（看可取餐號碼）'}</button>
         ${state.showBoard ? renderCallBoard(null) : ''}
-        <div class="card" style="margin-bottom:14px;background:#fff;box-shadow:0 2px 6px rgba(28,94,122,.07);">
-          <div style="display:flex;align-items:center;gap:8px;flex:1;">
-            <span style="font-size:18px">👤</span>
-            <input id="phone-member" type="tel" inputmode="numeric" maxlength="10" placeholder="輸入手機（會員，例：0912345678）" value="${escapeHtml(state.memberPhone)}" class="input-group" style="border:none;background:transparent;color:var(--ink);flex:1;">
-          </div>
-        </div>
         <div class="toggle-row">
           <button class="${state.diningType === '內用' ? 'active' : ''}" data-action="set-dining" data-type="內用">🍽️ 內用</button>
           <button class="${state.diningType === '外帶' ? 'active' : ''}" data-action="set-dining" data-type="外帶">🛍️ 外帶</button>
@@ -543,8 +537,8 @@
             <div style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-soft);margin-bottom:8px;">
               用餐方式：<span style="font-weight:800;color:var(--pink-deep);">${state.diningType}</span>（可於上方切換）
             </div>
-            <input id="table-input" class="input-group" placeholder="${state.diningType === '內用' ? '桌號（例：3號桌）' : '取餐名稱（必填，例：小美）'}" value="${escapeHtml(state.tableInfo)}">
-            ${state.diningType === '外帶' ? `<input id="phone-input" type="tel" inputmode="numeric" maxlength="10" class="input-group" placeholder="手機（必填，例：0912345678）" value="${escapeHtml(state.phone || state.memberPhone)}" style="margin-top:8px;">` : ''}
+            <input id="phone-input" type="tel" inputmode="numeric" maxlength="10" class="input-group" placeholder="手機（必填，例：0912345678）" value="${escapeHtml(state.phone)}">
+            <input id="table-input" class="input-group" placeholder="${state.diningType === '內用' ? '桌號（例：3號桌）' : '取餐名稱（必填，例：小美）'}" value="${escapeHtml(state.tableInfo)}" style="margin-top:8px;">
             <input id="note-input" class="input-group" placeholder="整單備註（例：餐具、不附吸管）" value="${escapeHtml(state.note)}" style="margin-top:8px;">
             <button class="button-submit" data-action="submit-order">🔔 送出訂單 · $${cartTotal()}</button>
           </div>
@@ -602,7 +596,9 @@
             <div style="display:flex;align-items:center;justify-content:space-between;font-weight:900;border-top:1px solid var(--line);margin-top:8px;padding-top:8px;"><span>合計</span><span style="color:var(--pink);">$${order.total}</span></div>
           </div>
           <div style="margin-top:14px;">${renderCallBoard(order.no)}</div>
-          <button class="button-primary" data-action="new-order" style="width:100%;background:#fff;color:var(--pink-deep);border:2px solid var(--pink);font-weight:700;">再點一單</button>
+          ${(order.status === 'done' || order.picked)
+            ? `<button class="button-primary" data-action="new-order" style="width:100%;background:#fff;color:var(--pink-deep);border:2px solid var(--pink);font-weight:700;">${order.picked ? '✅ 已取餐，再點一單' : '再點一單'}</button>`
+            : `<div style="text-align:center;color:var(--ink-soft);font-size:13px;margin-top:6px;">餐點製作中，完成後即可再點下一單 🍳</div>`}
         </div>
       `;
 
@@ -736,6 +732,7 @@
       } else if (action === 'submit-order') {
         submitOrder();
       } else if (action === 'new-order') {
+        try { localStorage.removeItem('xyg-cust-active'); } catch (e) {} // 解除一機一單鎖定、重置
         state.currentOrderId = null;
         state.cart = [];
         state.diningType = '內用';
@@ -752,26 +749,27 @@
       }
     }
 
-    function submitOrder() {
+    async function submitOrder() {
       if (state.submitting) return; // 防連點：避免一次送出產生重複訂單
       if (cartCount() === 0) {
         showMessage('請先加入餐點');
         return;
       }
-      const phone = (state.phone || state.memberPhone || '').trim();
-      // 外帶必填：取餐名稱 + 手機（避免客人未取餐找不到人）
-      if (state.diningType === '外帶') {
-        if (!state.tableInfo.trim()) { showMessage('外帶請填取餐名稱'); return; }
-        if (!/^09\d{8}$/.test(phone)) { showMessage('外帶請填正確手機號碼（09 開頭共 10 碼）'); return; }
-      }
+      const phone = (state.phone || '').trim();
+      // 必填手機（每張單綁一支手機作為身份）；外帶另需取餐名稱
+      if (!/^09\d{8}$/.test(phone)) { showMessage('請填正確手機號碼（09 開頭共 10 碼）'); return; }
+      if (state.diningType === '外帶' && !state.tableInfo.trim()) { showMessage('外帶請填取餐名稱'); return; }
       state.submitting = true;
+      // 全店唯一取餐號（線上交易取號，保證不撞；失敗退回裝置前綴）
+      let no = await nextDailyNo();
+      if (!no) no = orderNo(orders);
       const order = {
         id: getDeviceId() + '-' + Date.now(), // 裝置碼+時間戳：全域唯一，離線重傳也不會在雲端重複
         deviceId: getDeviceId(),
-        no: orderNo(orders),
+        no: no,
         type: state.diningType,
         table: state.tableInfo.trim() || (state.diningType === '內用' ? '未填桌號' : '未填名稱'),
-        phone: phone, // 外帶必填；內用若有帶會員手機也一併記錄
+        phone: phone,
         note: state.note.trim(),
         items: state.cart.map(line => {
           const mi = getItem(line.id);
@@ -786,6 +784,7 @@
       orders = orders.concat([order]); // 樂觀更新，雲端快照回來後會自動校正
       syncAddOrder(order);
       state.currentOrderId = order.id;
+      try { localStorage.setItem('xyg-cust-active', order.id); } catch (e) {} // 一機一單：記住進行中訂單
       state.cart = [];
       state.cartOpen = false;
       showMessage('訂單已送出');
@@ -802,9 +801,17 @@
       if (!state.currentOrderId && !state.activeItem && !state.cartOpen) updateActiveCat();
     }, { passive: true });
 
+    // 一機一單：若本機有進行中的訂單，重開仍回到該訂單狀態頁（避免同一支手機重複下單）
+    try { state.currentOrderId = localStorage.getItem('xyg-cust-active') || null; } catch (e) {}
+
     renderCustomer();
     initSync(list => {
       orders = list;
+      // 進行中的訂單若已被清掉（例如隔日清除），自動解鎖回到點餐
+      if (state.currentOrderId && !orders.some(o => o.id === state.currentOrderId)) {
+        const stillCaching = list.length === 0;
+        if (!stillCaching) { state.currentOrderId = null; try { localStorage.removeItem('xyg-cust-active'); } catch (e) {} }
+      }
       // 雲端任何變動都即時重畫（號碼變色/文字改變/消失都會跟著動）；已保留焦點與捲動位置避免干擾點餐
       renderCustomer();
     }, { today: true });

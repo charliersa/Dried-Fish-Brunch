@@ -371,6 +371,33 @@ function orderNo(orders) {
   return getDeviceCode() + String(mineToday + 1).padStart(2, '0');
 }
 
+function todayKey() {
+  const d = new Date();
+  return '' + d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+}
+
+// 全店唯一取餐號（顧客手機用）：線上以 Firestore 交易在 config/counter-YYYYMMDD 原子遞增，保證不撞號；
+// 離線或失敗回傳 null，由呼叫端退回 orderNo() 的裝置前綴方案。
+async function nextDailyNo() {
+  const db = ensureDb();
+  if (!db) return null;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return null; // 離線直接退回備援，避免交易卡住
+  try {
+    const ref = db.collection('config').doc('counter-' + todayKey());
+    const seq = await db.runTransaction(async tx => {
+      const snap = await tx.get(ref);
+      const cur = (snap.exists && snap.data() && snap.data().seq) ? snap.data().seq : 0;
+      const next = cur + 1;
+      tx.set(ref, { seq: next }, { merge: true });
+      return next;
+    });
+    return String(seq).padStart(2, '0');
+  } catch (e) {
+    console.warn('取號交易失敗，改用裝置前綴', e);
+    return null;
+  }
+}
+
 function escapeHtml(text) {
   return String(text || '')
     .replace(/&/g, '&amp;')
