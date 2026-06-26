@@ -128,7 +128,7 @@
     let lastCompleted = null;
 
     function getCompletedToday() {
-      return orders.filter(order => isToday(order.createdAt) && order.status === 'done');
+      return orders.filter(order => isToday(order.createdAt) && order.status === 'done' && !order.picked);
     }
 
     function renderDisplay() {

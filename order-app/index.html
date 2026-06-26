@@ -321,7 +321,7 @@
     // 公共叫號板：顯示今天「可取餐（已完成）」的號碼，highlightNo 為顧客自己的號碼
     function renderCallBoard(highlightNo) {
       const today = orders.filter(o => isToday(o.createdAt));
-      const ready = today.filter(o => o.status === 'done').sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+      const ready = today.filter(o => o.status === 'done' && !o.picked).sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
       const making = today.filter(o => o.status !== 'done').length;
       const chips = ready.length
         ? ready.map(o => `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:60px;padding:10px 14px;border-radius:14px;font-size:22px;font-weight:900;${o.no === highlightNo ? 'background:var(--pink);color:#fff;box-shadow:0 4px 12px rgba(216,75,132,.4);' : 'background:#fff;color:var(--pink-deep);border:2px solid var(--pink);'}">${escapeHtml(o.no)}</span>`).join('')
