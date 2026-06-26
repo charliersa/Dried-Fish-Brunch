@@ -133,6 +133,7 @@
             <span>${order.type}</span>
             <span>·</span>
             <span>${escapeHtml(order.table)}</span>
+            ${order.phone ? `<span>·</span><span>📞 ${escapeHtml(order.phone)}</span>` : ''}
           </div>
           <div class="order-items">
             ${itemsHtml}
