@@ -59,12 +59,33 @@
         done: doneOrders.length,
       };
 
-      const ready = doneOrders.filter(o => !o.picked); // 已完成、尚未取餐
+      // 已完成、但「結帳 + 取餐」尚未都完成 → 留在結單區；兩者都完成才消失
+      const ready = doneOrders.filter(o => !((o.pay && o.pay.paid) && o.picked));
       const readyHtml = ready.length ? `
         <div style="background:#fff;border-radius:18px;padding:14px 16px;margin-bottom:14px;box-shadow:0 2px 6px rgba(28,94,122,.07);border-left:6px solid #e5534b;">
-          <div style="font-weight:900;margin-bottom:10px;">🔴 已可取餐（${ready.length}） <span style="font-size:12px;color:var(--ink-soft);font-weight:400;">— 交餐後點號碼即可清除</span></div>
-          <div style="display:flex;flex-wrap:wrap;gap:10px;">
-            ${ready.map(o => `<button data-action="pickup" data-id="${o.id}" style="display:inline-flex;align-items:center;gap:8px;border:2px solid #e5534b;background:#fff;color:#e5534b;font-weight:900;font-size:20px;padding:10px 16px;border-radius:14px;cursor:pointer;">${escapeHtml(o.no)}<span style="font-size:13px;font-weight:700;">✔️ 已取餐</span></button>`).join('')}
+          <div style="font-weight:900;margin-bottom:10px;">🔴 待結單（${ready.length}） <span style="font-size:12px;color:var(--ink-soft);font-weight:400;">— 結帳＋取餐都完成後自動消失</span></div>
+          <div style="display:grid;gap:10px;">
+            ${ready.map(o => {
+              const paid = !!(o.pay && o.pay.paid);
+              const payBadge = paid
+                ? `<span style="font-weight:800;color:var(--green);font-size:13px;">${o.pay.method === 'cash' ? '💵 已結帳(現金)' : o.pay.method === 'mobile' ? '📱 已結帳(行動)' : '✅ 已結帳'}</span>`
+                : `<button class="pill-button" style="border-color:var(--green);color:var(--green);" data-action="pay-cash" data-id="${o.id}">💵 現金</button>
+                   <button class="pill-button" style="border-color:var(--blue);color:var(--blue);" data-action="pay-mobile" data-id="${o.id}">📱 行動</button>`;
+              const pickBadge = o.picked
+                ? `<span style="font-weight:800;color:var(--green);font-size:13px;">✅ 已取餐</span>`
+                : `<button class="pill-button" style="border-color:#e5534b;color:#e5534b;" data-action="pickup" data-id="${o.id}">✔️ 取餐</button>`;
+              return `
+                <div style="border:2px solid #e5534b;border-radius:14px;padding:10px 12px;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                    <span style="font-size:22px;font-weight:900;color:#e5534b;">${escapeHtml(o.no)}</span>
+                    <span style="font-size:12px;color:var(--ink-soft);">${o.type} · ${escapeHtml(o.table || '')}${o.phone ? ' · 📞' + escapeHtml(o.phone) : ''} · $${o.total}</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <span style="font-size:13px;color:var(--ink-soft);">結帳：</span>${payBadge}
+                    <span style="font-size:13px;color:var(--ink-soft);margin-left:6px;">取餐：</span>${pickBadge}
+                  </div>
+                </div>`;
+            }).join('')}
           </div>
         </div>` : '';
 
@@ -170,9 +191,18 @@
         const id = btn.dataset.id;
         const order = orders.find(o => o.id === id);
         if (order) {
-          order.picked = true; // 樂觀更新：標記已取餐 → 從叫號板移除
+          order.picked = true; // 樂觀更新：標記已取餐
           renderKitchen();
           syncUpdateOrder(id, { picked: true, updatedAt: Date.now() });
+        }
+      } else if (action === 'pay-cash' || action === 'pay-mobile') {
+        const id = btn.dataset.id;
+        const method = action === 'pay-cash' ? 'cash' : 'mobile';
+        const order = orders.find(o => o.id === id);
+        if (order && !(order.pay && order.pay.paid)) {
+          order.pay = { method, paid: true }; // 樂觀更新：標記已結帳（不動製作狀態）
+          renderKitchen();
+          syncUpdateOrder(id, { pay: { method, paid: true }, updatedAt: Date.now() });
         }
       } else if (action === 'refresh') {
         renderKitchen();
