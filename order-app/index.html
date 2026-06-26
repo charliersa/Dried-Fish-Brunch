@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#1c5e7a" />
   <link rel="manifest" href="manifest.json" />
-  <title>顧客點餐 - 小魚乾線上點餐系統</title>
+  <title>小魚乾早午餐 · 線上點餐</title>
   <style>
     /* 共用樣式由 shared.js 於頁尾注入 */
     .cat-bar {
@@ -277,14 +277,6 @@
         <div class="info-chip">⏰ 6:00–12:00</div>
       </div>
       <div class="address">📍 台南市東區長東街 106 號 · 現點現做，請耐心等候</div>
-      <div class="nav-pills">
-        <a href="customer.html" style="background:#fff;color:var(--ink);">🍽️ 顧客點餐</a>
-        <a href="kitchen.html">👨‍🍳 廚房後台</a>
-        <a href="cashier.html">💰 外場收銀</a>
-        <a href="display.html">📺 叫號螢幕</a>
-        <a href="admin.html">🔒 管理後台</a>
-        <a href="order-app/">📱 手機點餐</a>
-      </div>
     </header>
     <main id="app"></main>
   </div>
@@ -323,7 +315,27 @@
       itemOptions: [],
       currentOrderId: null,
       submitting: false,
+      showBoard: false,
     };
+
+    // 公共叫號板：顯示今天「可取餐（已完成）」的號碼，highlightNo 為顧客自己的號碼
+    function renderCallBoard(highlightNo) {
+      const today = orders.filter(o => isToday(o.createdAt));
+      const ready = today.filter(o => o.status === 'done').sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+      const making = today.filter(o => o.status !== 'done').length;
+      const chips = ready.length
+        ? ready.map(o => `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:60px;padding:10px 14px;border-radius:14px;font-size:22px;font-weight:900;${o.no === highlightNo ? 'background:var(--pink);color:#fff;box-shadow:0 4px 12px rgba(216,75,132,.4);' : 'background:#fff;color:var(--pink-deep);border:2px solid var(--pink);'}">${escapeHtml(o.no)}</span>`).join('')
+        : '<div style="color:var(--ink-soft);padding:8px 0;">目前還沒有可取餐的號碼</div>';
+      return `
+        <div style="background:#fff;border-radius:18px;padding:16px;margin-bottom:14px;box-shadow:0 2px 6px rgba(28,94,122,.07);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+            <span style="font-weight:900;font-size:16px;">✅ 可取餐號碼</span>
+            <span style="font-size:12px;color:var(--ink-soft);">製作中 ${making} 單</span>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;">${chips}</div>
+        </div>
+      `;
+    }
 
     function cartCount() {
       return state.cart.reduce((total, line) => total + line.qty, 0);
@@ -384,6 +396,8 @@
       const caret = activeEl && typeof activeEl.selectionStart === 'number' ? activeEl.selectionStart : null;
 
       app.innerHTML = `
+        <button class="button-primary" data-action="toggle-board" style="width:100%;justify-content:center;margin-bottom:12px;background:#fff;color:var(--pink-deep);border:2px solid var(--pink);font-weight:800;">📺 ${state.showBoard ? '收起叫號板' : '查看叫號板（看可取餐號碼）'}</button>
+        ${state.showBoard ? renderCallBoard(null) : ''}
         <div class="card" style="margin-bottom:14px;background:#fff;box-shadow:0 2px 6px rgba(28,94,122,.07);">
           <div style="display:flex;align-items:center;gap:8px;flex:1;">
             <span style="font-size:18px">👤</span>
@@ -574,7 +588,8 @@
             ${order.note ? `<div style="font-size:13px;color:var(--amber);margin-top:6px;background:rgba(232,154,43,.1);border-radius:8px;padding:5px 8px;">備註：${escapeHtml(order.note)}</div>` : ''}
             <div style="display:flex;align-items:center;justify-content:space-between;font-weight:900;border-top:1px solid var(--line);margin-top:8px;padding-top:8px;"><span>合計</span><span style="color:var(--pink);">$${order.total}</span></div>
           </div>
-          <button class="button-primary" data-action="new-order" style="width:100%;margin-top:14px;background:#fff;color:var(--pink-deep);border:2px solid var(--pink);font-weight:700;">再點一單</button>
+          <div style="margin-top:14px;">${renderCallBoard(order.no)}</div>
+          <button class="button-primary" data-action="new-order" style="width:100%;background:#fff;color:var(--pink-deep);border:2px solid var(--pink);font-weight:700;">再點一單</button>
         </div>
       `;
 
@@ -638,6 +653,12 @@
       const action = btn.dataset.action;
       if (!action) return;
       event.stopPropagation();
+
+      if (action === 'toggle-board') {
+        state.showBoard = !state.showBoard;
+        renderCustomer();
+        return;
+      }
 
       if (action === 'open-item') {
         const id = btn.dataset.id;
@@ -713,6 +734,7 @@
         state.activeItem = null;
         state.itemOptions = [];
         state.submitting = false;
+        state.showBoard = false;
         renderCustomer();
       }
     }
@@ -770,7 +792,8 @@
     renderCustomer();
     initSync(list => {
       orders = list;
-      if (state.currentOrderId) renderCustomer();
+      // 看狀態頁或叫號板時，雲端更新要即時反映（叫號板會自動更新）
+      if (state.currentOrderId || state.showBoard) renderCustomer();
     }, { today: true });
     initConfig(() => {
       if (!state.currentOrderId) renderCustomer();
