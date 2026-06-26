@@ -393,6 +393,79 @@
     const isPaid = o => !!(o.pay && o.pay.paid);
     const nameOf = it => it.name || (getItem(it.id) ? getItem(it.id).name : '(未知)');
     const priceOf = it => (it.price != null ? it.price : (getItem(it.id) ? getItem(it.id).price : 0));
+    const dayKey = ts => { const d = new Date(ts); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+
+    // 整理某一天的報表資料（訂單明細 + 金額合計 + 現金/行動分類 + 品項統計）
+    function buildReportData(dateStr) {
+      const day = orders.filter(o => dayKey(o.createdAt) === dateStr).sort((a, b) => a.createdAt - b.createdAt);
+      const paid = day.filter(isPaid);
+      const cash = paid.filter(o => o.pay && o.pay.method === 'cash');
+      const mobile = paid.filter(o => o.pay && o.pay.method === 'mobile');
+      const sum = arr => arr.reduce((s, o) => s + (o.total || 0), 0);
+      const stat = {};
+      day.forEach(o => (o.items || []).forEach(it => { const n = nameOf(it); if (!stat[n]) stat[n] = { qty: 0, rev: 0 }; stat[n].qty += it.qty; stat[n].rev += priceOf(it) * it.qty; }));
+      const items = Object.keys(stat).map(name => ({ name, qty: stat[name].qty, rev: stat[name].rev })).sort((a, b) => b.qty - a.qty);
+      return { dateStr, day, count: day.length, paidCount: paid.length, revenue: sum(paid), cashCount: cash.length, cashSum: sum(cash), mobileCount: mobile.length, mobileSum: sum(mobile), unpaidCount: day.length - paid.length, items };
+    }
+
+    function orderItemsText(o) {
+      return (o.items || []).map(it => nameOf(it) + (it.temp ? '(' + it.temp + ')' : '') + (it.note ? '[' + it.note + ']' : '') + '×' + it.qty).join('、');
+    }
+    const payText = o => (o.pay && o.pay.paid) ? (o.pay.method === 'cash' ? '現金' : '行動') : '未結';
+
+    // 列印當日報表（開新視窗、自動列印）
+    function printDayReport(dateStr) {
+      if (!dateStr) { showMessage('請選擇日期'); return; }
+      const r = buildReportData(dateStr);
+      const w = window.open('', '_blank');
+      if (!w) { showMessage('請允許彈出視窗後再試'); return; }
+      const sumRows = `
+        <table><tr><th>總訂單數</th><td>${r.count} 筆</td><th>已結帳</th><td>${r.paidCount} 筆</td><th>未結帳</th><td>${r.unpaidCount} 筆</td></tr>
+        <tr><th>總營收</th><td style="color:#d84b84;font-weight:900;">$${r.revenue}</td><th>💵 現金</th><td>$${r.cashSum}（${r.cashCount}筆）</td><th>📱 行動</th><td>$${r.mobileSum}（${r.mobileCount}筆）</td></tr></table>`;
+      const itemRows = r.items.length ? r.items.map(it => `<tr><td>${escapeHtml(it.name)}</td><td style="text-align:right">${it.qty}</td><td style="text-align:right">$${it.rev}</td></tr>`).join('') : '<tr><td colspan="3">無</td></tr>';
+      const orderRows = r.day.length ? r.day.map(o => `<tr><td>${escapeHtml(o.no)}</td><td>${fmtTime(o.createdAt)}</td><td>${o.type} ${escapeHtml(o.table || '')}</td><td>${escapeHtml(orderItemsText(o))}</td><td>${payText(o)}</td><td style="text-align:right">$${o.total}</td></tr>`).join('') : '<tr><td colspan="6">當日無訂單</td></tr>';
+      w.document.write(`<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>每日報表 ${dateStr}</title>
+        <style>
+          @page{margin:14mm;} *{box-sizing:border-box;}
+          body{font-family:"Microsoft JhengHei","PingFang TC",sans-serif;color:#222;font-size:13px;line-height:1.6;}
+          h1{font-size:22px;color:#1c5e7a;border-bottom:3px solid #ec6398;padding-bottom:6px;margin:0 0 4px;}
+          h2{font-size:16px;color:#1c5e7a;border-left:5px solid #ec6398;padding-left:8px;margin:18px 0 8px;}
+          .sub{color:#666;margin-bottom:10px;}
+          table{border-collapse:collapse;width:100%;margin:6px 0;font-size:12.5px;}
+          th,td{border:1px solid #d3e9f2;padding:6px 8px;text-align:left;vertical-align:top;}
+          th{background:#eaf4f9;color:#1c5e7a;white-space:nowrap;}
+          tr:nth-child(even) td{background:#fafdff;}
+          @media print{button{display:none;}}
+        </style></head><body>
+        <h1>🐟 小魚乾早午餐 · 每日報表</h1>
+        <div class="sub">日期：${dateStr}　列印時間：${fmtTime(Date.now())}</div>
+        <h2>營收摘要</h2>${sumRows}
+        <h2>品項銷售統計</h2><table><tr><th>品項</th><th style="text-align:right">數量</th><th style="text-align:right">小計</th></tr>${itemRows}</table>
+        <h2>訂單明細</h2><table><tr><th>取餐號</th><th>時間</th><th>類型/桌號</th><th>品項</th><th>付款</th><th style="text-align:right">金額</th></tr>${orderRows}</table>
+        <script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script>
+      </body></html>`);
+      w.document.close();
+    }
+
+    // 同步當日報表到 Google Sheet（Apps Script Web App）
+    async function syncDayToSheet(dateStr) {
+      if (!dateStr) { showMessage('請選擇日期'); return; }
+      const url = ((cfg && cfg.sheetUrl) || '').trim();
+      if (!url) { showMessage('請先填寫並儲存 Google Sheet 連結網址'); return; }
+      const r = buildReportData(dateStr);
+      const payload = {
+        date: dateStr, store: '小魚乾早午餐',
+        summary: { count: r.count, paidCount: r.paidCount, unpaidCount: r.unpaidCount, revenue: r.revenue, cashCount: r.cashCount, cashSum: r.cashSum, mobileCount: r.mobileCount, mobileSum: r.mobileSum },
+        orders: r.day.map(o => ({ no: o.no, time: fmtTime(o.createdAt), type: o.type, table: o.table || '', phone: o.phone || '', items: orderItemsText(o), note: o.note || '', total: o.total || 0, pay: payText(o) })),
+        items: r.items
+      };
+      try {
+        await fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+        showMessage('已送出到 Google Sheet，請到試算表確認 ✅');
+      } catch (e) {
+        showMessage('同步失敗：' + (e && e.message ? e.message : '請檢查網址'));
+      }
+    }
     function catNameOf(it) {
       for (const c of CURRENT_MENU) for (const i of c.items) if (i.id === it.id || i.name === it.name) return c.name;
       return '其他';
@@ -663,6 +736,20 @@
       }).join('');
       const tbtn = on => `border-radius:999px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer;${on ? 'border:none;background:var(--ink);color:#fff;' : 'border:1.5px solid var(--line);background:#fff;color:var(--ink-soft);'}`;
       return `
+        <div class="admin-card" style="margin-bottom:14px;">
+          <h3 style="margin:0 0 10px;">📑 每日報表</h3>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <label style="font-size:13px;">日期</label>
+            <input type="date" id="hist-date" value="${dayKey(Date.now())}" style="border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;">
+            <button class="add-btn" data-action="hist-print">🖨️ 列印報表</button>
+            <button class="add-btn" data-action="hist-sync">📊 同步到 Google Sheet</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;">
+            <label style="font-size:12px;color:var(--ink-soft);white-space:nowrap;">Google Sheet 連結</label>
+            <input id="sheet-url" placeholder="貼上 Apps Script Web App 網址" value="${escapeHtml(cfg.sheetUrl || '')}" style="flex:1;min-width:200px;border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;">
+            <button class="mini-btn" data-action="hist-save-sheet">儲存</button>
+          </div>
+        </div>
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
           <div style="display:flex;gap:8px;">
             <button data-action="hist-today" style="${tbtn(histScope === 'today')}">今日</button>
@@ -744,6 +831,9 @@
       const cat = b.dataset.cat, id = b.dataset.id, kind = b.dataset.kind;
       if (a === 'hist-today') { histScope = 'today'; renderAdmin(); }
       else if (a === 'hist-all') { histScope = 'all'; renderAdmin(); }
+      else if (a === 'hist-print') { const el = document.getElementById('hist-date'); printDayReport(el ? el.value : ''); }
+      else if (a === 'hist-sync') { const el = document.getElementById('hist-date'); syncDayToSheet(el ? el.value : ''); }
+      else if (a === 'hist-save-sheet') { const el = document.getElementById('sheet-url'); cfg = Object.assign({}, cfg, { sheetUrl: el ? el.value.trim() : '' }); saveConfig(cfg); showMessage('已儲存 Google Sheet 連結'); }
       else if (a === 'item-active') { toggleItem(cat, id, 'active'); }
       else if (a === 'item-sold') { toggleItem(cat, id, 'soldOut'); }
       else if (a === 'item-del') { if (confirm('確定刪除此品項？')) deleteItem(cat, id); }
