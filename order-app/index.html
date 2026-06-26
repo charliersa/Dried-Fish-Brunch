@@ -401,10 +401,11 @@
         return `<section class="section" id="sec-${category.id}"><div class="section-title"><span style="font-size:22px">${category.icon}</span><h2>${category.name}</h2><div class="section-divider"></div></div><div class="grid">${items}</div></section>`;
       }).join('');
 
-      // 記住目前焦點欄位與游標，避免背景每 3 秒重畫時把打字打斷
+      // 記住目前焦點欄位與游標、捲動位置，避免背景重畫時打斷打字或畫面跳動
       const activeEl = document.activeElement;
       const focusId = activeEl && activeEl.id ? activeEl.id : null;
       const caret = activeEl && typeof activeEl.selectionStart === 'number' ? activeEl.selectionStart : null;
+      const scrollY = window.scrollY;
 
       app.innerHTML = `
         <button class="button-primary" data-action="toggle-board" style="width:100%;justify-content:center;margin-bottom:12px;background:#fff;color:var(--pink-deep);border:2px solid var(--pink);font-weight:800;">📺 ${state.showBoard ? '收起叫號板' : '查看叫號板（看可取餐號碼）'}</button>
@@ -438,6 +439,7 @@
           }
         }
       }
+      if (scrollY) window.scrollTo(0, scrollY); // 還原捲動位置
     }
 
     function renderMenuItem(category, item) {
@@ -803,8 +805,8 @@
     renderCustomer();
     initSync(list => {
       orders = list;
-      // 看狀態頁或叫號板時，雲端更新要即時反映（叫號板會自動更新）
-      if (state.currentOrderId || state.showBoard) renderCustomer();
+      // 雲端任何變動都即時重畫（號碼變色/文字改變/消失都會跟著動）；已保留焦點與捲動位置避免干擾點餐
+      renderCustomer();
     }, { today: true });
     initConfig(() => {
       if (!state.currentOrderId) renderCustomer();
