@@ -177,7 +177,7 @@
     initSync(list => {
       orders = list;
       renderCashier();
-    });
+    }, { today: true });
 
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service Worker failed:', err));

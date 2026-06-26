@@ -87,14 +87,27 @@ const SYNC = {
   pollTimer: null,
 };
 
+function startOfToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
 // 註冊資料變更監聽；callback 會在初次與每次資料變動時被呼叫，帶入最新訂單陣列
-function initSync(onChange) {
+// opts.today = true → 只訂閱「今天」的訂單（點餐/廚房/收銀/叫號用，避免下載全部歷史）
+// 不帶 opts → 訂閱全部歷史（管理後台報表用）
+function initSync(onChange, opts) {
+  opts = opts || {};
   SYNC.onChange = onChange;
   const db = ensureDb();
   if (db) {
     SYNC.db = db;
     SYNC.mode = 'cloud';
-    db.collection('orders').orderBy('createdAt', 'asc').onSnapshot(
+    let query = db.collection('orders').orderBy('createdAt', 'asc');
+    if (opts.today) {
+      query = db.collection('orders').where('createdAt', '>=', startOfToday()).orderBy('createdAt', 'asc');
+    }
+    query.onSnapshot(
       snap => {
         const list = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch (e) {}
@@ -142,16 +155,26 @@ function syncUpdateOrder(id, changes) {
   return Promise.resolve();
 }
 
-function syncClearOrders() {
+// opts.todayOnly = true → 只清除今天的訂單（保留歷史，報表不受影響）
+function syncClearOrders(opts) {
+  opts = opts || {};
   if (SYNC.mode === 'cloud' && SYNC.db) {
-    return SYNC.db.collection('orders').get().then(snap => {
+    const base = SYNC.db.collection('orders');
+    const getP = opts.todayOnly ? base.where('createdAt', '>=', startOfToday()).get() : base.get();
+    return getP.then(snap => {
       const batch = SYNC.db.batch();
       snap.docs.forEach(doc => batch.delete(doc.ref));
       return batch.commit();
     }).catch(e => console.warn('清除訂單失敗', e));
   }
-  saveOrders([]);
-  if (SYNC.onChange) SYNC.onChange([]);
+  if (opts.todayOnly) {
+    const remain = loadOrders().filter(o => !isToday(o.createdAt));
+    saveOrders(remain);
+    if (SYNC.onChange) SYNC.onChange(remain);
+  } else {
+    saveOrders([]);
+    if (SYNC.onChange) SYNC.onChange([]);
+  }
   return Promise.resolve();
 }
 

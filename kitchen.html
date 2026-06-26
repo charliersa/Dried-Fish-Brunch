@@ -72,7 +72,7 @@
           <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);">${syncModeLabel()} · 自動更新</div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <button class="pill-button" data-action="refresh" style="cursor:pointer;">重新整理</button>
-            <button class="pill-button" data-action="clear-orders" style="cursor:pointer;">清除全部</button>
+            <button class="pill-button" data-action="clear-orders" style="cursor:pointer;">清除今日</button>
           </div>
         </div>
         ${cardsHtml}
@@ -152,8 +152,8 @@
       } else if (action === 'refresh') {
         renderKitchen();
       } else if (action === 'clear-orders') {
-        if (confirm('確定要清除全部訂單嗎？')) {
-          syncClearOrders();
+        if (confirm('確定要清除「今日」的訂單嗎？（歷史訂單與報表不受影響）')) {
+          syncClearOrders({ todayOnly: true });
         }
       }
     }
@@ -162,7 +162,7 @@
     initSync(list => {
       orders = list;
       renderKitchen();
-    });
+    }, { today: true });
 
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service Worker failed:', err));

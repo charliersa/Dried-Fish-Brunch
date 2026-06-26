@@ -693,7 +693,7 @@
     initSync(list => {
       orders = list;
       if (state.currentOrderId) renderCustomer();
-    });
+    }, { today: true });
     initConfig(() => {
       if (!state.currentOrderId) renderCustomer();
     });
