@@ -8,8 +8,50 @@
   <title>顧客點餐 - 小魚乾線上點餐系統</title>
   <style>
     /* 共用樣式由 shared.js 於頁尾注入 */
-    main {
-      padding-bottom: 88px;
+    .cat-bar {
+      position: sticky;
+      top: 0;
+      z-index: 25;
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 10px 16px;
+      margin: 0 -16px 14px;
+      background: var(--bg-top);
+      border-bottom: 1px solid var(--line);
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+
+    .cat-bar::-webkit-scrollbar {
+      display: none;
+    }
+
+    .cat-chip {
+      flex: 0 0 auto;
+      border: 1.5px solid var(--line);
+      background: #fff;
+      color: var(--ink-soft);
+      font-weight: 700;
+      font-size: 13px;
+      padding: 7px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .cat-chip.active {
+      background: var(--pink);
+      border-color: var(--pink);
+      color: #fff;
+    }
+
+    .section {
+      scroll-margin-top: 60px;
+    }
+
+    .menu-card {
+      cursor: pointer;
     }
 
     .menu-info {
@@ -32,31 +74,21 @@
       color: var(--pink);
     }
 
-    .temp-bar {
-      display: flex;
-      gap: 6px;
-      margin-top: 8px;
-    }
-
-    .temp-button {
+    .add-circle {
+      flex: 0 0 auto;
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
       border: none;
-      border-radius: 999px;
-      padding: 4px 12px;
-      font-size: 12px;
-      font-weight: 700;
-      background: #f1f6f9;
-      color: #9db4bf;
+      background: var(--pink);
+      color: #fff;
+      font-size: 22px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       cursor: pointer;
-    }
-
-    .temp-button.active.cold {
-      background: var(--blue-bg);
-      color: var(--blue);
-    }
-
-    .temp-button.active.hot {
-      background: var(--amber-bg);
-      color: var(--amber);
+      box-shadow: 0 4px 10px rgba(216, 75, 132, .3);
     }
 
     .stepper {
@@ -137,6 +169,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 10px;
       background: #fff;
       border-radius: 14px;
       padding: 10px 12px;
@@ -233,7 +266,7 @@
 
   <div id="cart-bar" class="cart-bar" style="display:none;">
     <span id="cart-info"></span>
-    <span style="font-weight:900;">→</span>
+    <span style="font-weight:900;">前往結帳 →</span>
   </div>
 
   <div id="toast" class="toast"></div>
@@ -250,33 +283,48 @@
     let orders = loadOrders();
 
     const state = {
-      cart: {},
-      temp: {},
-      pending: {},
+      cart: [],            // [{ lineId, id, temp, note, qty }]
       diningType: '內用',
       tableInfo: '',
       note: '',
       cartOpen: false,
+      activeItem: null,    // 商品詳情彈窗中的品項 id
+      itemTemp: '冷',
+      itemQty: 1,
+      itemNote: '',
       currentOrderId: null,
     };
 
-    function cartLines() {
-      return Object.values(state.cart);
-    }
-
-    function pendingQty(id) {
-      return state.pending[id] || 1;
-    }
-
     function cartCount() {
-      return cartLines().reduce((total, line) => total + line.qty, 0);
+      return state.cart.reduce((total, line) => total + line.qty, 0);
     }
 
     function cartTotal() {
-      return cartLines().reduce((sum, line) => {
+      return state.cart.reduce((sum, line) => {
         const item = getItem(line.id);
         return sum + (item ? item.price * line.qty : 0);
       }, 0);
+    }
+
+    function inCartQty(id) {
+      return state.cart.filter(line => line.id === id).reduce((sum, line) => sum + line.qty, 0);
+    }
+
+    function getCategoryOf(itemId) {
+      return CURRENT_MENU.find(cat => cat.items.some(it => it.id === itemId));
+    }
+
+    function visibleCategories() {
+      return CURRENT_MENU.filter(cat => cat.items.some(it => it.active !== false));
+    }
+
+    function addToCart(id, temp, note, qty) {
+      const existing = state.cart.find(line => line.id === id && line.temp === (temp || '') && (line.note || '') === (note || ''));
+      if (existing) {
+        existing.qty += qty;
+      } else {
+        state.cart.push({ lineId: Date.now() + '_' + Math.floor(Math.random() * 1000), id, temp: temp || '', note: note || '', qty });
+      }
     }
 
     function renderCustomer() {
@@ -288,25 +336,37 @@
         }
       }
 
-      const menuSections = CURRENT_MENU.map(category => {
+      const cats = visibleCategories();
+      const catBar = `
+        <div class="cat-bar">
+          ${cats.map(cat => `<button class="cat-chip" data-action="jump-cat" data-cat="${cat.id}">${cat.icon} ${cat.name}</button>`).join('')}
+        </div>
+      `;
+
+      const menuSections = cats.map(category => {
         const items = category.items.filter(it => it.active !== false).map(item => renderMenuItem(category, item)).join('');
-        if (!items) return '';
-        return `<section class="section"><div class="section-title"><span style="font-size:22px">${category.icon}</span><h2>${category.name}</h2><div class="section-divider"></div></div><div class="grid">${items}</div></section>`;
+        return `<section class="section" id="sec-${category.id}"><div class="section-title"><span style="font-size:22px">${category.icon}</span><h2>${category.name}</h2><div class="section-divider"></div></div><div class="grid">${items}</div></section>`;
       }).join('');
 
       app.innerHTML = `
-        <div class="card" style="margin-bottom:18px;background:#fff;box-shadow:0 2px 6px rgba(28,94,122,.07);">
-          <div style="display:flex;align-items:center;gap:8px;">
+        <div class="card" style="margin-bottom:14px;background:#fff;box-shadow:0 2px 6px rgba(28,94,122,.07);">
+          <div style="display:flex;align-items:center;gap:8px;flex:1;">
             <span style="font-size:18px">👤</span>
             <input id="phone-member" type="text" placeholder="輸入手機快速帶入常用餐點（會員）" class="input-group" style="border:none;background:transparent;color:var(--ink);flex:1;">
           </div>
         </div>
+        <div class="toggle-row">
+          <button class="${state.diningType === '內用' ? 'active' : ''}" data-action="set-dining" data-type="內用">🍽️ 內用</button>
+          <button class="${state.diningType === '外帶' ? 'active' : ''}" data-action="set-dining" data-type="外帶">🛍️ 外帶</button>
+        </div>
+        ${catBar}
         ${menuSections}
-        ${state.cartOpen ? renderCartSheet() : ''}
+        ${state.activeItem ? renderItemSheet() : (state.cartOpen ? renderCartSheet() : '')}
       `;
 
       attachEvents();
       updateCartBar();
+      updateActiveCat();
     }
 
     function renderMenuItem(category, item) {
@@ -319,53 +379,77 @@
           <button class="pill-button" disabled style="opacity:.8;cursor:default;">售完</button>
         </div>`;
       }
-      const temp = category.temp ? (state.temp[item.id] || '冷') : '';
-      const qty = pendingQty(item.id);
-      const inCart = cartLines().filter(line => line.id === item.id).reduce((sum, line) => sum + line.qty, 0);
-      const tempButtons = category.temp ? `
-        <div class="temp-bar">
-          ${['冷', '熱'].map(type => `
-            <button class="temp-button ${state.temp[item.id] === type ? 'active ' + (type === '熱' ? 'hot' : 'cold') : ''}" data-action="set-temp" data-id="${item.id}" data-temp="${type}">${type}</button>
-          `).join('')}
-        </div>
-      ` : '';
-
+      const inCart = inCartQty(item.id);
       return `
-        <div class="card">
+        <div class="card menu-card" data-action="open-item" data-id="${item.id}">
           <div class="menu-info">
             <div class="menu-title"><span>${item.name}</span><span class="menu-price">$${item.price}</span></div>
-            ${inCart ? `<div style="font-size:11px;color:var(--ink-soft);margin-top:3px;">🛒 購物車已有 ${inCart} 份</div>` : ''}
-            ${tempButtons}
+            ${category.temp ? `<div style="font-size:11px;color:var(--ink-soft);margin-top:3px;">可選 冷／熱</div>` : ''}
+            ${inCart ? `<div style="font-size:11px;color:var(--pink-deep);margin-top:3px;font-weight:700;">🛒 已加入 ${inCart} 份</div>` : ''}
           </div>
-          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
-            <div class="stepper">
-              <button class="circle-button" data-action="pending-dec" data-id="${item.id}">－</button>
-              <div style="font-weight:900;min-width:18px;text-align:center">${qty}</div>
-              <button class="circle-button filled" data-action="pending-inc" data-id="${item.id}">＋</button>
+          <button class="add-circle" data-action="open-item" data-id="${item.id}">＋</button>
+        </div>
+      `;
+    }
+
+    function renderItemSheet() {
+      const item = getItem(state.activeItem);
+      if (!item) return '';
+      const category = getCategoryOf(item.id);
+      const hasTemp = !!(category && category.temp);
+      const temp = hasTemp ? (state.itemTemp || '冷') : '';
+      const qty = state.itemQty || 1;
+      const subtotal = item.price * qty;
+
+      return `
+        <div class="overlay" data-action="close-item">
+          <div class="sheet" data-ignore>
+            <div class="sheet-header">
+              <h3>${item.name}</h3>
+              <button data-action="close-item" style="border:none;background:none;cursor:pointer;color:var(--ink-soft);font-size:20px;">✕</button>
             </div>
-            <button class="button-primary" data-action="add-to-cart" data-id="${item.id}" data-temp="${temp}" style="white-space:nowrap;">＋ 加入購物車</button>
+            <div style="color:var(--pink);font-weight:900;font-size:18px;margin-bottom:16px;">$${item.price}</div>
+            ${hasTemp ? `
+              <div style="font-weight:700;margin-bottom:6px;">溫度</div>
+              <div class="toggle-row">
+                <button class="${temp === '冷' ? 'active' : ''}" data-action="item-temp" data-temp="冷">🧊 冷</button>
+                <button class="${temp === '熱' ? 'active' : ''}" data-action="item-temp" data-temp="熱">🔥 熱</button>
+              </div>
+            ` : ''}
+            <div style="font-weight:700;margin:6px 0;">餐點備註</div>
+            <input id="item-note-input" class="input-group" placeholder="例：不要辣、醬多一點、去冰" value="${escapeHtml(state.itemNote || '')}">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:18px;">
+              <span style="font-weight:700;">數量</span>
+              <div class="stepper">
+                <button class="circle-button" data-action="item-qty-dec">－</button>
+                <div style="font-weight:900;min-width:24px;text-align:center;font-size:18px;">${qty}</div>
+                <button class="circle-button filled" data-action="item-qty-inc">＋</button>
+              </div>
+            </div>
+            <button class="button-submit" data-action="confirm-add-item">＋ 加入購物車 · $${subtotal}</button>
           </div>
         </div>
       `;
     }
 
     function renderCartSheet() {
-      const lines = cartLines();
+      const lines = state.cart;
       const content = lines.length === 0 ? '<div style="color:var(--ink-soft);text-align:center;padding:18px 0;">購物車目前是空的</div>' : lines.map(line => {
         const item = getItem(line.id);
         if (!item) return '';
         return `
           <div class="line-item">
-            <div>
+            <div style="min-width:0;">
               <span style="font-weight:700">${item.name}</span>
-              ${line.temp ? `<span style="margin-left:6px;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:${line.temp === '冷' ? 'var(--blue-bg)' : 'var(--amber-bg)'};color:${line.temp === '冷' ? 'var(--blue)' : 'var(--amber)'}">${line.temp}</span>` : ''}
+              ${line.temp ? `<span style="margin-left:6px;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:${line.temp === '冷' ? 'var(--blue-bg)' : 'rgba(232,154,43,.15)'};color:${line.temp === '冷' ? 'var(--blue)' : 'var(--amber)'}">${line.temp}</span>` : ''}
+              ${line.note ? `<div style="font-size:12px;color:var(--amber);margin-top:2px;">📝 ${escapeHtml(line.note)}</div>` : ''}
               <div style="font-size:12px;color:var(--ink-soft);">$${item.price}</div>
             </div>
             <div class="stepper">
-              <button class="circle-button" data-action="decrease-item" data-key="${line.id}_${line.temp}">－</button>
+              <button class="circle-button" data-action="dec-line" data-line="${line.lineId}">－</button>
               <div style="font-weight:900;min-width:16px;text-align:center">${line.qty}</div>
-              <button class="circle-button filled" data-action="add-item" data-id="${line.id}" data-temp="${line.temp}">＋</button>
-              <button class="small-button" data-action="remove-item" data-key="${line.id}_${line.temp}">🗑</button>
+              <button class="circle-button filled" data-action="inc-line" data-line="${line.lineId}">＋</button>
+              <button class="small-button" data-action="rm-line" data-line="${line.lineId}">🗑</button>
             </div>
           </div>
         `;
@@ -378,13 +462,12 @@
               <h3>確認餐點</h3>
               <button data-action="close-sheet" style="border:none;background:none;cursor:pointer;color:var(--ink-soft);font-size:20px;">✕</button>
             </div>
-            <div style="display:grid;gap:8px;margin-bottom:16px;">${content}</div>
-            <div class="toggle-row">
-              <button class="${state.diningType === '內用' ? 'active' : ''}" data-action="set-dining" data-type="內用">🍽️ 內用</button>
-              <button class="${state.diningType === '外帶' ? 'active' : ''}" data-action="set-dining" data-type="外帶">🛍️ 外帶</button>
+            <div style="display:grid;gap:8px;margin-bottom:14px;">${content}</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-soft);margin-bottom:8px;">
+              用餐方式：<span style="font-weight:800;color:var(--pink-deep);">${state.diningType}</span>（可於上方切換）
             </div>
             <input id="table-input" class="input-group" placeholder="${state.diningType === '內用' ? '桌號（例：3號桌）' : '取餐名稱（例：小美）'}" value="${escapeHtml(state.tableInfo)}">
-            <input id="note-input" class="input-group" placeholder="備註（例：豆漿去冰、不要辣）" value="${escapeHtml(state.note)}" style="margin-top:8px;">
+            <input id="note-input" class="input-group" placeholder="整單備註（例：餐具、不附吸管）" value="${escapeHtml(state.note)}" style="margin-top:8px;">
             <button class="button-submit" data-action="submit-order">🔔 送出訂單 · $${cartTotal()}</button>
           </div>
         </div>
@@ -411,9 +494,9 @@
       }).join('');
 
       const itemsHtml = order.items.map(item => `
-        <div style="display:flex;align-items:center;justify-content:space-between;font-size:14px;padding:3px 0;">
-          <span>${item.name}${item.temp ? `（${item.temp}）` : ''} ×${item.qty}</span>
-          <span style="color:var(--ink-soft);">$${item.price * item.qty}</span>
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;font-size:14px;padding:3px 0;">
+          <span>${item.name}${item.temp ? `（${item.temp}）` : ''} ×${item.qty}${item.note ? `<span style="color:var(--amber);"> · 📝${escapeHtml(item.note)}</span>` : ''}</span>
+          <span style="color:var(--ink-soft);white-space:nowrap;">$${item.price * item.qty}</span>
         </div>
       `).join('');
 
@@ -446,7 +529,7 @@
 
     function updateCartBar() {
       const count = cartCount();
-      if (count > 0) {
+      if (count > 0 && !state.currentOrderId) {
         cartBar.style.display = 'flex';
         cartInfo.textContent = `🛒 ${count} 項 · $${cartTotal()}`;
       } else {
@@ -454,12 +537,35 @@
       }
     }
 
+    function updateActiveCat() {
+      const chips = Array.from(document.querySelectorAll('.cat-chip'));
+      if (!chips.length) return;
+      let activeId = null;
+      visibleCategories().forEach(cat => {
+        const sec = document.getElementById('sec-' + cat.id);
+        if (sec && sec.getBoundingClientRect().top <= 80) activeId = cat.id;
+      });
+      if (!activeId) {
+        const first = visibleCategories()[0];
+        if (first) activeId = first.id;
+      }
+      chips.forEach(chip => chip.classList.toggle('active', chip.dataset.cat === activeId));
+      const active = chips.find(chip => chip.classList.contains('active'));
+      if (active) {
+        const bar = active.parentElement;
+        bar.scrollLeft = active.offsetLeft - bar.clientWidth / 2 + active.clientWidth / 2;
+      }
+    }
+
     function attachEvents() {
       app.querySelectorAll('[data-action]').forEach(btn => btn.addEventListener('click', handleAction));
+      app.querySelectorAll('[data-ignore]').forEach(el => el.addEventListener('click', e => e.stopPropagation()));
       const tableInput = document.getElementById('table-input');
       const noteInput = document.getElementById('note-input');
+      const itemNoteInput = document.getElementById('item-note-input');
       if (tableInput) tableInput.addEventListener('input', e => state.tableInfo = e.target.value);
       if (noteInput) noteInput.addEventListener('input', e => state.note = e.target.value);
+      if (itemNoteInput) itemNoteInput.addEventListener('input', e => state.itemNote = e.target.value);
     }
 
     function handleAction(event) {
@@ -468,47 +574,52 @@
       if (!action) return;
       event.stopPropagation();
 
-      if (action === 'pending-inc') {
+      if (action === 'open-item') {
         const id = btn.dataset.id;
-        state.pending[id] = pendingQty(id) + 1;
+        const category = getCategoryOf(id);
+        state.activeItem = id;
+        state.itemTemp = (category && category.temp) ? '冷' : '';
+        state.itemQty = 1;
+        state.itemNote = '';
+        state.cartOpen = false;
         renderCustomer();
-      } else if (action === 'pending-dec') {
-        const id = btn.dataset.id;
-        state.pending[id] = Math.max(1, pendingQty(id) - 1);
+      } else if (action === 'close-item') {
+        state.activeItem = null;
         renderCustomer();
-      } else if (action === 'add-to-cart') {
-        const id = btn.dataset.id;
-        const temp = btn.dataset.temp;
-        const key = id + (temp ? '_' + temp : '');
-        const addQty = pendingQty(id);
-        state.cart[key] = state.cart[key] || { id, temp, qty: 0 };
-        state.cart[key].qty += addQty;
-        state.pending[id] = 1;
-        const mi = getItem(id);
-        showMessage(`已加入購物車：${mi ? mi.name : ''}${temp ? '（' + temp + '）' : ''} ×${addQty}`);
+      } else if (action === 'item-temp') {
+        state.itemTemp = btn.dataset.temp;
         renderCustomer();
-      } else if (action === 'add-item') {
-        const id = btn.dataset.id;
-        const temp = btn.dataset.temp;
-        const key = id + (temp ? '_' + temp : '');
-        state.cart[key] = state.cart[key] || { id, temp, qty: 0 };
-        state.cart[key].qty += 1;
+      } else if (action === 'item-qty-inc') {
+        state.itemQty = (state.itemQty || 1) + 1;
         renderCustomer();
-      } else if (action === 'decrease-item') {
-        const key = btn.dataset.key;
-        if (state.cart[key]) {
-          if (state.cart[key].qty <= 1) {
-            delete state.cart[key];
-          } else {
-            state.cart[key].qty -= 1;
-          }
+      } else if (action === 'item-qty-dec') {
+        state.itemQty = Math.max(1, (state.itemQty || 1) - 1);
+        renderCustomer();
+      } else if (action === 'confirm-add-item') {
+        const item = getItem(state.activeItem);
+        const noteEl = document.getElementById('item-note-input');
+        const note = (noteEl ? noteEl.value : (state.itemNote || '')).trim();
+        const qty = state.itemQty || 1;
+        const temp = state.itemTemp || '';
+        addToCart(state.activeItem, temp, note, qty);
+        showMessage(`已加入購物車：${item ? item.name : ''}${temp ? '（' + temp + '）' : ''} ×${qty}`);
+        state.activeItem = null;
+        renderCustomer();
+      } else if (action === 'jump-cat') {
+        const el = document.getElementById('sec-' + btn.dataset.cat);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else if (action === 'inc-line') {
+        const line = state.cart.find(l => l.lineId === btn.dataset.line);
+        if (line) { line.qty += 1; renderCustomer(); }
+      } else if (action === 'dec-line') {
+        const line = state.cart.find(l => l.lineId === btn.dataset.line);
+        if (line) {
+          if (line.qty <= 1) state.cart = state.cart.filter(l => l.lineId !== line.lineId);
+          else line.qty -= 1;
           renderCustomer();
         }
-      } else if (action === 'remove-item') {
-        delete state.cart[btn.dataset.key];
-        renderCustomer();
-      } else if (action === 'set-temp') {
-        state.temp[btn.dataset.id] = btn.dataset.temp;
+      } else if (action === 'rm-line') {
+        state.cart = state.cart.filter(l => l.lineId !== btn.dataset.line);
         renderCustomer();
       } else if (action === 'set-dining') {
         state.diningType = btn.dataset.type;
@@ -520,13 +631,12 @@
         submitOrder();
       } else if (action === 'new-order') {
         state.currentOrderId = null;
-        state.cart = {};
-        state.temp = {};
-        state.pending = {};
+        state.cart = [];
         state.diningType = '內用';
         state.tableInfo = '';
         state.note = '';
         state.cartOpen = false;
+        state.activeItem = null;
         renderCustomer();
       }
     }
@@ -542,9 +652,9 @@
         type: state.diningType,
         table: state.tableInfo.trim() || (state.diningType === '內用' ? '未填桌號' : '未填名稱'),
         note: state.note.trim(),
-        items: cartLines().map(line => {
+        items: state.cart.map(line => {
           const mi = getItem(line.id);
-          return { id: line.id, name: mi ? mi.name : '', price: mi ? mi.price : 0, temp: line.temp || '', qty: line.qty };
+          return { id: line.id, name: mi ? mi.name : '', price: mi ? mi.price : 0, temp: line.temp || '', note: line.note || '', qty: line.qty };
         }),
         total: cartTotal(),
         status: 'new',
@@ -555,17 +665,21 @@
       orders = orders.concat([order]); // 樂觀更新，雲端快照回來後會自動校正
       syncAddOrder(order);
       state.currentOrderId = order.id;
-      state.cart = {};
-      state.pending = {};
+      state.cart = [];
       state.cartOpen = false;
       showMessage('訂單已送出');
       renderCustomer();
     }
 
     cartBar.addEventListener('click', () => {
+      state.activeItem = null;
       state.cartOpen = !state.cartOpen;
       renderCustomer();
     });
+
+    window.addEventListener('scroll', () => {
+      if (!state.currentOrderId && !state.activeItem && !state.cartOpen) updateActiveCat();
+    }, { passive: true });
 
     renderCustomer();
     initSync(list => {

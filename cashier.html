@@ -109,9 +109,9 @@
       const status = statusMap[order.status];
 
       const itemsHtml = order.items.map(item => `
-        <div style="display:flex;align-items:center;justify-content:space-between;font-size:13px;padding:2px 0;">
-          <span>${item.name}${item.temp ? `（${item.temp}）` : ''} ×${item.qty}</span>
-          <span>$${item.price * item.qty}</span>
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;font-size:13px;padding:2px 0;">
+          <span>${item.name}${item.temp ? `（${item.temp}）` : ''} ×${item.qty}${item.note ? `<span style="color:var(--amber);"> · 📝${escapeHtml(item.note)}</span>` : ''}</span>
+          <span style="white-space:nowrap;">$${item.price * item.qty}</span>
         </div>
       `).join('');
 
