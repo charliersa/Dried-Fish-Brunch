@@ -293,6 +293,7 @@
       itemQty: 1,
       itemNote: '',
       currentOrderId: null,
+      submitting: false,
     };
 
     function cartCount() {
@@ -641,15 +642,18 @@
         state.note = '';
         state.cartOpen = false;
         state.activeItem = null;
+        state.submitting = false;
         renderCustomer();
       }
     }
 
     function submitOrder() {
+      if (state.submitting) return; // 防連點：避免一次送出產生重複訂單
       if (cartCount() === 0) {
         showMessage('請先加入餐點');
         return;
       }
+      state.submitting = true;
       const order = {
         id: Date.now() + '_' + Math.floor(Math.random() * 1000),
         no: orderNo(orders),
