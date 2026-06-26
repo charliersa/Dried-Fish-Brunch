@@ -48,6 +48,20 @@ const MENU = [
   },
 ];
 
+// ===== 餐點備註：可「用按的」快速選項（依菜單分類 id 對應，找不到就用 default）=====
+// 想改文字／增減選項，直接編輯這裡即可（顧客點餐的商品詳情彈窗會用到）。
+const NOTE_OPTIONS = {
+  toast: ['不要沙拉', '不要蕃茄醬', '不要黑胡椒', '不要生菜', '不要蕃茄片', '不要小黃瓜'],
+  egg: ['不要醬油膏', '不要辣椒醬', '不要蔥', '不要胡椒'],
+  drink: ['去冰', '少冰', '微糖', '半糖', '無糖'],
+  snack: ['不要胡椒鹽', '不要蕃茄醬', '要辣'],
+  default: ['不要沙拉', '不要蕃茄醬', '不要黑胡椒', '不要生菜'],
+};
+
+function noteOptionsFor(catId) {
+  return NOTE_OPTIONS[catId] || NOTE_OPTIONS.default;
+}
+
 const STORAGE_KEY = 'xyg-order-system';
 
 function loadOrders() {

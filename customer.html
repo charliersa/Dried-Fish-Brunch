@@ -54,6 +54,30 @@
       cursor: pointer;
     }
 
+    .opt-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .opt-chip {
+      border: 1.5px solid var(--line);
+      background: #fff;
+      color: var(--ink-soft);
+      font-weight: 700;
+      font-size: 13px;
+      padding: 7px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+    }
+
+    .opt-chip.active {
+      background: var(--pink);
+      border-color: var(--pink);
+      color: #fff;
+    }
+
     .menu-info {
       min-width: 0;
       flex: 1;
@@ -292,6 +316,7 @@
       itemTemp: '冷',
       itemQty: 1,
       itemNote: '',
+      itemOptions: [],
       currentOrderId: null,
       submitting: false,
     };
@@ -418,7 +443,11 @@
               </div>
             ` : ''}
             <div style="font-weight:700;margin:6px 0;">餐點備註</div>
-            <input id="item-note-input" class="input-group" placeholder="例：不要辣、醬多一點、去冰" value="${escapeHtml(state.itemNote || '')}">
+            ${(() => {
+              const opts = noteOptionsFor(category ? category.id : '');
+              return opts.length ? `<div class="opt-grid">${opts.map(o => `<button class="opt-chip ${state.itemOptions.includes(o) ? 'active' : ''}" data-action="item-opt" data-opt="${o}">${state.itemOptions.includes(o) ? '✕ ' : ''}${o}</button>`).join('')}</div>` : '';
+            })()}
+            <input id="item-note-input" class="input-group" placeholder="其他備註（例：醬多一點、餐點切塊）" value="${escapeHtml(state.itemNote || '')}">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-top:18px;">
               <span style="font-weight:700;">數量</span>
               <div class="stepper">
@@ -586,7 +615,13 @@
         state.itemTemp = (category && category.temp) ? '冷' : '';
         state.itemQty = 1;
         state.itemNote = '';
+        state.itemOptions = [];
         state.cartOpen = false;
+        renderCustomer();
+      } else if (action === 'item-opt') {
+        const o = btn.dataset.opt;
+        if (state.itemOptions.includes(o)) state.itemOptions = state.itemOptions.filter(x => x !== o);
+        else state.itemOptions = state.itemOptions.concat([o]);
         renderCustomer();
       } else if (action === 'close-item') {
         state.activeItem = null;
@@ -603,7 +638,8 @@
       } else if (action === 'confirm-add-item') {
         const item = getItem(state.activeItem);
         const noteEl = document.getElementById('item-note-input');
-        const note = (noteEl ? noteEl.value : (state.itemNote || '')).trim();
+        const freeText = (noteEl ? noteEl.value : (state.itemNote || '')).trim();
+        const note = state.itemOptions.concat(freeText ? [freeText] : []).join('、');
         const qty = state.itemQty || 1;
         const temp = state.itemTemp || '';
         addToCart(state.activeItem, temp, note, qty);
@@ -642,6 +678,7 @@
         state.note = '';
         state.cartOpen = false;
         state.activeItem = null;
+        state.itemOptions = [];
         state.submitting = false;
         renderCustomer();
       }
