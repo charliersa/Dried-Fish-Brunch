@@ -259,6 +259,9 @@ function initConfig(onChange) {
         d = normalizeConfig(d);
         CONFIG.data = d;
         CURRENT_MENU = d.menu;
+        const json = JSON.stringify(d);
+        if (json === CONFIG._lastJson) return; // 設定沒變就不重畫
+        CONFIG._lastJson = json;
         if (CONFIG.onChange) CONFIG.onChange(d);
       },
       err => { console.warn('設定同步中斷，改用本機', err); startLocalConfig(); }
@@ -276,6 +279,9 @@ function startLocalConfig() {
     d = normalizeConfig(d);
     CONFIG.data = d;
     CURRENT_MENU = d.menu;
+    const json = JSON.stringify(d);
+    if (json === CONFIG._lastJson) return; // 設定沒變就不重畫
+    CONFIG._lastJson = json;
     if (CONFIG.onChange) CONFIG.onChange(d);
   };
   tick();

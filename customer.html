@@ -376,6 +376,11 @@
         return `<section class="section" id="sec-${category.id}"><div class="section-title"><span style="font-size:22px">${category.icon}</span><h2>${category.name}</h2><div class="section-divider"></div></div><div class="grid">${items}</div></section>`;
       }).join('');
 
+      // 記住目前焦點欄位與游標，避免背景每 3 秒重畫時把打字打斷
+      const activeEl = document.activeElement;
+      const focusId = activeEl && activeEl.id ? activeEl.id : null;
+      const caret = activeEl && typeof activeEl.selectionStart === 'number' ? activeEl.selectionStart : null;
+
       app.innerHTML = `
         <div class="card" style="margin-bottom:14px;background:#fff;box-shadow:0 2px 6px rgba(28,94,122,.07);">
           <div style="display:flex;align-items:center;gap:8px;flex:1;">
@@ -395,6 +400,17 @@
       attachEvents();
       updateCartBar();
       updateActiveCat();
+
+      // 還原焦點與游標
+      if (focusId) {
+        const el = document.getElementById(focusId);
+        if (el) {
+          el.focus();
+          if (caret != null && typeof el.setSelectionRange === 'function') {
+            try { el.setSelectionRange(caret, caret); } catch (e) {}
+          }
+        }
+      }
     }
 
     function renderMenuItem(category, item) {
