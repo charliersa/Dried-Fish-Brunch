@@ -118,9 +118,9 @@
             <span>${escapeHtml(order.table)}</span>
           </div>
           <div class="order-items">
-            ${order.items.map(item => `
-              <div class="item-row"><span>${item.name}${item.temp ? `（${item.temp}）` : ''}${item.note ? ` <span style="color:var(--amber);font-weight:700;">📝${escapeHtml(item.note)}</span>` : ''}</span><span>×${item.qty}</span></div>
-            `).join('')}
+            ${order.items.map(item => { const mi = getItem(item.id); const nm = item.name || (mi && mi.name) || '未知品項'; return `
+              <div class="item-row"><span>${nm}${item.temp ? `（${item.temp}）` : ''}${item.note ? ` <span style="color:var(--amber);font-weight:700;">📝${escapeHtml(item.note)}</span>` : ''}</span><span>×${item.qty}</span></div>
+            `; }).join('')}
             ${order.note ? `<div class="order-note">📝 ${escapeHtml(order.note)}</div>` : ''}
           </div>
           <div class="order-footer">

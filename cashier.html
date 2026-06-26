@@ -108,12 +108,16 @@
       };
       const status = statusMap[order.status];
 
-      const itemsHtml = order.items.map(item => `
+      const itemsHtml = order.items.map(item => {
+        const mi = getItem(item.id);
+        const nm = item.name || (mi && mi.name) || '未知品項';
+        const price = (item.price != null ? item.price : (mi ? mi.price : 0));
+        return `
         <div style="display:flex;align-items:flex-start;justify-content:space-between;font-size:13px;padding:2px 0;">
-          <span>${item.name}${item.temp ? `（${item.temp}）` : ''} ×${item.qty}${item.note ? `<span style="color:var(--amber);"> · 📝${escapeHtml(item.note)}</span>` : ''}</span>
-          <span style="white-space:nowrap;">$${item.price * item.qty}</span>
+          <span>${nm}${item.temp ? `（${item.temp}）` : ''} ×${item.qty}${item.note ? `<span style="color:var(--amber);"> · 📝${escapeHtml(item.note)}</span>` : ''}</span>
+          <span style="white-space:nowrap;">$${price * item.qty}</span>
         </div>
-      `).join('');
+      `; }).join('');
 
       return `
         <div class="order-card" style="border-top-color:${status.color};">
