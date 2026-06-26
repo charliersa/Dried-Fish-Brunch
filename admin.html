@@ -394,6 +394,8 @@
     const nameOf = it => it.name || (getItem(it.id) ? getItem(it.id).name : '(未知)');
     const priceOf = it => (it.price != null ? it.price : (getItem(it.id) ? getItem(it.id).price : 0));
     const dayKey = ts => { const d = new Date(ts); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+    // 預設 Google Sheet 同步網址（Apps Script Web App）；後台欄位有填則以欄位為準
+    const DEFAULT_SHEET_URL = 'https://script.google.com/macros/s/AKfycbxbw2k5WKN2r1CCiteqBZKtrlZ8YTzTzGv6GJbpqtq7vw5MODTyMXAQZowYjqPCrtSk/exec';
 
     // 整理某一天的報表資料（訂單明細 + 金額合計 + 現金/行動分類 + 品項統計）
     function buildReportData(dateStr) {
@@ -450,7 +452,7 @@
     // 同步當日報表到 Google Sheet（Apps Script Web App）
     async function syncDayToSheet(dateStr) {
       if (!dateStr) { showMessage('請選擇日期'); return; }
-      const url = ((cfg && cfg.sheetUrl) || '').trim();
+      const url = ((cfg && cfg.sheetUrl) || DEFAULT_SHEET_URL || '').trim();
       if (!url) { showMessage('請先填寫並儲存 Google Sheet 連結網址'); return; }
       const r = buildReportData(dateStr);
       const payload = {
@@ -746,7 +748,7 @@
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;">
             <label style="font-size:12px;color:var(--ink-soft);white-space:nowrap;">Google Sheet 連結</label>
-            <input id="sheet-url" placeholder="貼上 Apps Script Web App 網址" value="${escapeHtml(cfg.sheetUrl || '')}" style="flex:1;min-width:200px;border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;">
+            <input id="sheet-url" placeholder="貼上 Apps Script Web App 網址" value="${escapeHtml(cfg.sheetUrl || DEFAULT_SHEET_URL)}" style="flex:1;min-width:200px;border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;">
             <button class="mini-btn" data-action="hist-save-sheet">儲存</button>
           </div>
         </div>
