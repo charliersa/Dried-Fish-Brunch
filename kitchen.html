@@ -43,6 +43,7 @@
   <script src="shared.js"></script>
   <script>document.head.insertAdjacentHTML('beforeend', '<style>' + getSharedStyles() + '</style>');</script>
   <script>
+    applyDeviceCodeFromUrl();
     const app = document.getElementById('app');
     let orders = loadOrders();
 
@@ -71,6 +72,7 @@
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
           <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);">${syncModeLabel()} · 自動更新</div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <button class="pill-button" data-action="set-device" style="cursor:pointer;">📟 本機代碼：${getDeviceCode()}</button>
             <button class="pill-button" data-action="refresh" style="cursor:pointer;">重新整理</button>
             <button class="pill-button" data-action="clear-orders" style="cursor:pointer;">清除今日</button>
           </div>
@@ -150,6 +152,9 @@
           renderKitchen();
           syncUpdateOrder(id, { status, updatedAt: Date.now() });
         }
+      } else if (action === 'set-device') {
+        const c = prompt('設定本機代碼（會顯示在取餐號前，建議每台不同，例：A、B）', getDeviceCode());
+        if (c) { setDeviceCode(c); renderKitchen(); }
       } else if (action === 'refresh') {
         renderKitchen();
       } else if (action === 'clear-orders') {

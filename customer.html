@@ -301,6 +301,7 @@
   <script src="shared.js"></script>
   <script>document.head.insertAdjacentHTML('beforeend', '<style>' + getSharedStyles() + '</style>');</script>
   <script>
+    applyDeviceCodeFromUrl();
     const app = document.getElementById('app');
     const cartBar = document.getElementById('cart-bar');
     const cartInfo = document.getElementById('cart-info');
@@ -729,7 +730,8 @@
       }
       state.submitting = true;
       const order = {
-        id: Date.now() + '_' + Math.floor(Math.random() * 1000),
+        id: getDeviceId() + '-' + Date.now(), // 裝置碼+時間戳：全域唯一，離線重傳也不會在雲端重複
+        deviceId: getDeviceId(),
         no: orderNo(orders),
         type: state.diningType,
         table: state.tableInfo.trim() || (state.diningType === '內用' ? '未填桌號' : '未填名稱'),

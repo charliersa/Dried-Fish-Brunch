@@ -59,6 +59,7 @@
   <script src="shared.js"></script>
   <script>document.head.insertAdjacentHTML('beforeend', '<style>' + getSharedStyles() + '</style>');</script>
   <script>
+    applyDeviceCodeFromUrl();
     const app = document.getElementById('app');
     let orders = loadOrders();
 
@@ -83,7 +84,10 @@
           ${renderStat('應收金額', '$' + totalPending, 'var(--pink)')}
         </div>
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
-          <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);">💰 營收統計</div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);">
+            💰 營收統計
+            <button class="pill-button" data-action="set-device" style="cursor:pointer;font-size:12px;padding:4px 10px;">📟 本機代碼：${getDeviceCode()}</button>
+          </div>
           <div>總營收: <span style="font-weight:900;color:var(--green);">$${totalRevenue}</span></div>
         </div>
         ${cardsHtml}
@@ -162,6 +166,11 @@
       const action = btn.dataset.action;
       if (!action) return;
 
+      if (action === 'set-device') {
+        const c = prompt('設定本機代碼（會顯示在取餐號前，建議每台不同，例：A、B）', getDeviceCode());
+        if (c) { setDeviceCode(c); renderCashier(); }
+        return;
+      }
       if (action === 'pay-cash' || action === 'pay-mobile') {
         const id = btn.dataset.id;
         const method = action === 'pay-cash' ? 'cash' : 'mobile';

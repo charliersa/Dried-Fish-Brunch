@@ -1,4 +1,4 @@
-const CACHE_NAME = 'xyg-order-pwa-v3';
+const CACHE_NAME = 'xyg-order-pwa-v4';
 const ASSETS = [
   './',
   './index.html',
@@ -30,25 +30,39 @@ self.addEventListener('activate', event => {
   );
 });
 
-// Network-first：有網路一律拿最新版（避免改版後被舊快取卡住）；離線才退回快取。
 self.addEventListener('fetch', event => {
-  const url = new URL(event.request.url);
+  const req = event.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  const sameOrigin = url.origin === self.location.origin;
+  // Firebase SDK 函式庫（gstatic）：版本化、不變 → cache-first，讓離線也能載入 Firebase（含 Firestore 離線持久化）
+  const isFirebaseLib = url.hostname === 'www.gstatic.com' && url.pathname.indexOf('/firebasejs/') !== -1;
 
-  // 只處理同源 GET；Firebase / CDN 等跨網域請求直接走網路（不快取，避免干擾即時同步）
-  if (url.origin !== self.location.origin || event.request.method !== 'GET') {
+  if (isFirebaseLib) {
+    event.respondWith(
+      caches.match(req).then(cached => cached || fetch(req).then(res => {
+        const clone = res.clone(); // 可能是 opaque(no-cors)，一律快取
+        caches.open(CACHE_NAME).then(cache => cache.put(req, clone));
+        return res;
+      }).catch(() => cached))
+    );
     return;
   }
 
+  // 其他跨網域（Firestore 連線 firestore.googleapis.com 等）不攔截，交給 Firebase SDK（離線時由其 IndexedDB 持久化處理）
+  if (!sameOrigin) return;
+
+  // 同源：network-first（有網拿最新版，避免改版被舊快取卡住；離線退回快取）
   event.respondWith(
-    fetch(event.request).then(response => {
+    fetch(req).then(response => {
       if (response && response.status === 200) {
         const clone = response.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+        caches.open(CACHE_NAME).then(cache => cache.put(req, clone));
       }
       return response;
-    }).catch(() => caches.match(event.request).then(cached => {
+    }).catch(() => caches.match(req).then(cached => {
       if (cached) return cached;
-      if (event.request.destination === 'document') return caches.match('./customer.html');
+      if (req.destination === 'document') return caches.match('./customer.html');
     }))
   );
 });

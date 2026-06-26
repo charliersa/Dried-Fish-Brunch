@@ -77,6 +77,7 @@ function saveOrders(orders) {
 }
 
 // ===== 共用 Firebase 連線 =====
+let _persistEnabled = false;
 function ensureDb() {
   const hasConfig = typeof firebase !== 'undefined'
     && typeof FIREBASE_CONFIG !== 'undefined'
@@ -84,11 +85,58 @@ function ensureDb() {
   if (!hasConfig) return null;
   try {
     if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
-    return firebase.firestore();
+    const db = firebase.firestore();
+    // 離線持久化：把雲端資料快取到 IndexedDB，離線可讀寫、回連自動同步（必須在第一次操作前啟用一次）
+    if (!_persistEnabled) {
+      _persistEnabled = true;
+      try {
+        db.enablePersistence({ synchronizeTabs: true })
+          .catch(e => console.warn('離線持久化未啟用：', e && e.code));
+      } catch (e) { console.warn('離線持久化呼叫失敗', e); }
+    }
+    return db;
   } catch (e) {
     console.warn('Firebase 初始化失敗', e);
     return null;
   }
+}
+
+// ===== 裝置識別（離線單號防撞）=====
+// 每台裝置首次開啟產生固定 deviceId；deviceCode 是顯示在取餐號前的代碼（可由 ?dev=A 或設定覆寫）
+function getDeviceId() {
+  let id = null;
+  try { id = localStorage.getItem('xyg-device-id'); } catch (e) {}
+  if (!id) {
+    id = 'D' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    try { localStorage.setItem('xyg-device-id', id); } catch (e) {}
+  }
+  return id;
+}
+
+function getDeviceCode() {
+  let c = null;
+  try { c = localStorage.getItem('xyg-device-code'); } catch (e) {}
+  if (!c) {
+    const id = getDeviceId();
+    let h = 0;
+    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+    c = String.fromCharCode(65 + (h % 26)); // 衍生一個字母當預設
+  }
+  return c;
+}
+
+function setDeviceCode(code) {
+  code = (code || '').trim().toUpperCase().slice(0, 2);
+  if (code) { try { localStorage.setItem('xyg-device-code', code); } catch (e) {} }
+  return getDeviceCode();
+}
+
+// 讓店員可用網址 ?dev=A 一次設定該台裝置代碼（之後該裝置就記住）
+function applyDeviceCodeFromUrl() {
+  try {
+    const p = new URLSearchParams(location.search).get('dev');
+    if (p) setDeviceCode(p);
+  } catch (e) {}
 }
 
 // ===== 資料同步層：Firebase 雲端即時同步，localStorage 離線備援 =====
@@ -316,10 +364,11 @@ function isToday(timestamp) {
   return new Date(timestamp).toLocaleDateString('zh-TW') === new Date().toLocaleDateString('zh-TW');
 }
 
+// 取餐號 = 裝置代碼 + 本機當日序號（每台只數自己的單，離線也不會跨裝置撞號）
 function orderNo(orders) {
-  const todayOrders = orders.filter(order => isToday(order.createdAt));
-  const index = todayOrders.length + 1;
-  return 'A' + String(index).padStart(2, '0');
+  const me = getDeviceId();
+  const mineToday = orders.filter(o => isToday(o.createdAt) && o.deviceId === me).length;
+  return getDeviceCode() + String(mineToday + 1).padStart(2, '0');
 }
 
 function escapeHtml(text) {
