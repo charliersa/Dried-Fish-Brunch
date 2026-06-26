@@ -269,6 +269,22 @@
     <main id="app"></main>
   </div>
 
+  <style>
+    #print-area { display: none; }
+    #print-area .rpt-h1 { font-size: 22px; color: #1c5e7a; border-bottom: 3px solid #ec6398; padding-bottom: 6px; margin: 0 0 4px; }
+    #print-area .rpt-h2 { font-size: 16px; color: #1c5e7a; border-left: 5px solid #ec6398; padding-left: 8px; margin: 16px 0 6px; }
+    #print-area .rpt-sub { color: #666; margin-bottom: 8px; font-size: 12px; }
+    #print-area table { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 12px; }
+    #print-area th, #print-area td { border: 1px solid #999; padding: 5px 7px; text-align: left; vertical-align: top; }
+    #print-area th { background: #eee; }
+    @media print {
+      body > .page, #toast { display: none !important; }
+      #print-area { display: block !important; }
+      @page { margin: 12mm; }
+    }
+  </style>
+  <div id="print-area"></div>
+
   <div id="toast" class="toast"></div>
 
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -415,38 +431,23 @@
     }
     const payText = o => (o.pay && o.pay.paid) ? (o.pay.method === 'cash' ? '現金' : '行動') : '未結';
 
-    // 列印當日報表（開新視窗、自動列印）
+    // 列印當日報表（頁內列印，不開新視窗，避免被彈出視窗封鎖器擋掉）
     function printDayReport(dateStr) {
       if (!dateStr) { showMessage('請選擇日期'); return; }
       const r = buildReportData(dateStr);
-      const w = window.open('', '_blank');
-      if (!w) { showMessage('請允許彈出視窗後再試'); return; }
       const sumRows = `
         <table><tr><th>總訂單數</th><td>${r.count} 筆</td><th>已結帳</th><td>${r.paidCount} 筆</td><th>未結帳</th><td>${r.unpaidCount} 筆</td></tr>
-        <tr><th>總營收</th><td style="color:#d84b84;font-weight:900;">$${r.revenue}</td><th>💵 現金</th><td>$${r.cashSum}（${r.cashCount}筆）</td><th>📱 行動</th><td>$${r.mobileSum}（${r.mobileCount}筆）</td></tr></table>`;
+        <tr><th>總營收</th><td>$${r.revenue}</td><th>💵 現金</th><td>$${r.cashSum}（${r.cashCount}筆）</td><th>📱 行動</th><td>$${r.mobileSum}（${r.mobileCount}筆）</td></tr></table>`;
       const itemRows = r.items.length ? r.items.map(it => `<tr><td>${escapeHtml(it.name)}</td><td style="text-align:right">${it.qty}</td><td style="text-align:right">$${it.rev}</td></tr>`).join('') : '<tr><td colspan="3">無</td></tr>';
       const orderRows = r.day.length ? r.day.map(o => `<tr><td>${escapeHtml(o.no)}</td><td>${fmtTime(o.createdAt)}</td><td>${o.type} ${escapeHtml(o.table || '')}</td><td>${escapeHtml(orderItemsText(o))}</td><td>${payText(o)}</td><td style="text-align:right">$${o.total}</td></tr>`).join('') : '<tr><td colspan="6">當日無訂單</td></tr>';
-      w.document.write(`<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>每日報表 ${dateStr}</title>
-        <style>
-          @page{margin:14mm;} *{box-sizing:border-box;}
-          body{font-family:"Microsoft JhengHei","PingFang TC",sans-serif;color:#222;font-size:13px;line-height:1.6;}
-          h1{font-size:22px;color:#1c5e7a;border-bottom:3px solid #ec6398;padding-bottom:6px;margin:0 0 4px;}
-          h2{font-size:16px;color:#1c5e7a;border-left:5px solid #ec6398;padding-left:8px;margin:18px 0 8px;}
-          .sub{color:#666;margin-bottom:10px;}
-          table{border-collapse:collapse;width:100%;margin:6px 0;font-size:12.5px;}
-          th,td{border:1px solid #d3e9f2;padding:6px 8px;text-align:left;vertical-align:top;}
-          th{background:#eaf4f9;color:#1c5e7a;white-space:nowrap;}
-          tr:nth-child(even) td{background:#fafdff;}
-          @media print{button{display:none;}}
-        </style></head><body>
-        <h1>🐟 小魚乾早午餐 · 每日報表</h1>
-        <div class="sub">日期：${dateStr}　列印時間：${fmtTime(Date.now())}</div>
-        <h2>營收摘要</h2>${sumRows}
-        <h2>品項銷售統計</h2><table><tr><th>品項</th><th style="text-align:right">數量</th><th style="text-align:right">小計</th></tr>${itemRows}</table>
-        <h2>訂單明細</h2><table><tr><th>取餐號</th><th>時間</th><th>類型/桌號</th><th>品項</th><th>付款</th><th style="text-align:right">金額</th></tr>${orderRows}</table>
-        <script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script>
-      </body></html>`);
-      w.document.close();
+      const area = document.getElementById('print-area');
+      area.innerHTML = `
+        <div class="rpt-h1">🐟 小魚乾早午餐 · 每日報表</div>
+        <div class="rpt-sub">日期：${dateStr}　列印時間：${fmtTime(Date.now())}</div>
+        <div class="rpt-h2">營收摘要</div>${sumRows}
+        <div class="rpt-h2">品項銷售統計</div><table><tr><th>品項</th><th style="text-align:right">數量</th><th style="text-align:right">小計</th></tr>${itemRows}</table>
+        <div class="rpt-h2">訂單明細</div><table><tr><th>取餐號</th><th>時間</th><th>類型/桌號</th><th>品項</th><th>付款</th><th style="text-align:right">金額</th></tr>${orderRows}</table>`;
+      window.print();
     }
 
     // 同步當日報表到 Google Sheet（Apps Script Web App）
