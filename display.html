@@ -127,53 +127,44 @@
     let orders = loadOrders();
     let lastCompleted = null;
 
-    function getCompletedToday() {
-      return orders.filter(order => isToday(order.createdAt) && order.status === 'done' && !order.picked);
-    }
-
     function renderDisplay() {
-      const todayCompleted = getCompletedToday();
-      
-      if (todayCompleted.length === 0) {
-        display.innerHTML = `
-          <div class="display-container">
-            <div class="display-header">
-              <h1>🐟 小魚乾早午餐</h1>
-              <p>DRIED FISH BRUNCH</p>
-            </div>
-            <div class="display-main">
-              <div class="empty-message">等待訂單中...</div>
-            </div>
-          </div>
-        `;
-        return;
-      }
+      const today = orders.filter(o => isToday(o.createdAt));
+      const ready = today.filter(o => o.status === 'done' && !o.picked).sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt)); // 紅：可取餐
+      const preparing = today.filter(o => o.status !== 'done').sort((a, b) => a.createdAt - b.createdAt); // 藍：準備中
 
-      const latestCompleted = todayCompleted[todayCompleted.length - 1];
-      const otherCompleted = todayCompleted.slice(0, -1);
-
-      // 如果有新完成的訂單，播放提示音
-      if (lastCompleted !== latestCompleted.id && typeof Audio !== 'undefined') {
+      // 有新號碼進入「可取餐」時嗶一聲
+      const topId = ready.length ? ready[0].id : null;
+      if (topId && lastCompleted !== topId && typeof Audio !== 'undefined') {
         try {
           const beep = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAAB9AAACABAAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj==');
           beep.play().catch(() => {});
         } catch (e) {}
       }
-      lastCompleted = latestCompleted.id;
+      lastCompleted = topId;
+
+      const readyHtml = ready.length
+        ? `<div style="display:flex;flex-wrap:wrap;gap:24px;justify-content:center;align-items:center;">
+             ${ready.map(o => `<div style="background:#fff;color:#e5534b;border:6px solid #e5534b;border-radius:24px;padding:14px 34px;font-size:110px;font-weight:900;line-height:1;box-shadow:0 10px 30px rgba(229,83,75,.4);animation:pulse 1.2s infinite;">${escapeHtml(o.no)}</div>`).join('')}
+           </div>`
+        : `<div class="empty-message">準備中，請稍候…</div>`;
+
+      const prepHtml = preparing.length
+        ? `<div style="padding:18px;width:100%;max-width:1200px;">
+             <div style="font-size:22px;opacity:.95;margin-bottom:10px;">🔵 準備中（製作中）</div>
+             <div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;">
+               ${preparing.map(o => `<div style="background:rgba(62,155,209,.35);border:2px solid rgba(255,255,255,.6);border-radius:14px;padding:12px 22px;font-size:32px;font-weight:900;">${escapeHtml(o.no)}</div>`).join('')}
+             </div>
+           </div>`
+        : '';
 
       display.innerHTML = `
         <div class="display-container">
           <div class="display-header">
             <h1>🐟 小魚乾早午餐</h1>
-            <p>DRIED FISH BRUNCH</p>
+            <p>🔴 紅色 = 已可取餐　🔵 藍色 = 準備中</p>
           </div>
-          <div class="display-main">
-            <div class="order-info">${latestCompleted.type} · ${escapeHtml(latestCompleted.table)}</div>
-            <div class="order-number">${latestCompleted.no}</div>
-          </div>
-          <div class="completed-list">
-            ${otherCompleted.map(order => `<div class="completed-number">${order.no}</div>`).join('')}
-          </div>
+          <div class="display-main">${readyHtml}</div>
+          ${prepHtml}
         </div>
       `;
     }

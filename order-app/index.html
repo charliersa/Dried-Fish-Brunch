@@ -318,21 +318,32 @@
       showBoard: false,
     };
 
-    // 公共叫號板：顯示今天「可取餐（已完成）」的號碼，highlightNo 為顧客自己的號碼
+    // 公共叫號板：準備取餐(藍)→已可取餐(紅)；highlightNo 為顧客自己的號碼（實心強調）
     function renderCallBoard(highlightNo) {
       const today = orders.filter(o => isToday(o.createdAt));
-      const ready = today.filter(o => o.status === 'done' && !o.picked).sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
-      const making = today.filter(o => o.status !== 'done').length;
-      const chips = ready.length
-        ? ready.map(o => `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:60px;padding:10px 14px;border-radius:14px;font-size:22px;font-weight:900;${o.no === highlightNo ? 'background:var(--pink);color:#fff;box-shadow:0 4px 12px rgba(216,75,132,.4);' : 'background:#fff;color:var(--pink-deep);border:2px solid var(--pink);'}">${escapeHtml(o.no)}</span>`).join('')
-        : '<div style="color:var(--ink-soft);padding:8px 0;">目前還沒有可取餐的號碼</div>';
+      const preparing = today.filter(o => o.status !== 'done').sort((a, b) => a.createdAt - b.createdAt);          // 藍：製作中/排隊
+      const ready = today.filter(o => o.status === 'done' && !o.picked).sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt)); // 紅：可取餐
+
+      const chip = (o, mode) => {
+        const own = o.no === highlightNo;
+        const red = mode === 'ready';
+        const base = red ? { c: '#e5534b', bg: '#fdecea' } : { c: 'var(--blue)', bg: 'var(--blue-bg)' };
+        const style = own
+          ? `background:${base.c};color:#fff;box-shadow:0 4px 12px ${red ? 'rgba(229,83,75,.45)' : 'rgba(62,155,209,.45)'};`
+          : `background:${base.bg};color:${base.c};border:2px solid ${base.c};`;
+        return `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:60px;padding:10px 14px;border-radius:14px;font-size:22px;font-weight:900;${style}">${escapeHtml(o.no)}</span>`;
+      };
+      const group = (title, dot, list, mode, empty) => `
+        <div style="margin-top:10px;">
+          <div style="font-weight:900;font-size:14px;margin-bottom:8px;">${dot} ${title}</div>
+          ${list.length ? `<div style="display:flex;flex-wrap:wrap;gap:10px;">${list.map(o => chip(o, mode)).join('')}</div>` : `<div style="color:var(--ink-soft);font-size:13px;padding:2px 0;">${empty}</div>`}
+        </div>`;
+
       return `
         <div style="background:#fff;border-radius:18px;padding:16px;margin-bottom:14px;box-shadow:0 2px 6px rgba(28,94,122,.07);">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-            <span style="font-weight:900;font-size:16px;">✅ 可取餐號碼</span>
-            <span style="font-size:12px;color:var(--ink-soft);">製作中 ${making} 單</span>
-          </div>
-          <div style="display:flex;flex-wrap:wrap;gap:10px;">${chips}</div>
+          <div style="font-weight:900;font-size:16px;">🔔 叫號板</div>
+          ${group('已可取餐（請取餐）', '🔴', ready, 'ready', '目前沒有可取餐的號碼')}
+          ${group('準備取餐（製作中）', '🔵', preparing, 'prep', '目前沒有等待中的訂單')}
         </div>
       `;
     }
