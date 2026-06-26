@@ -281,12 +281,9 @@
     let orders = loadOrders();
     let unlocked = false;
 
-    // Firebase 登入（管理後台需以管理員帳號登入）
-    const fbReady = typeof firebase !== 'undefined'
-      && typeof FIREBASE_CONFIG !== 'undefined'
-      && FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey;
-    if (fbReady && !firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
-    const auth = fbReady ? firebase.auth() : null;
+    // 管理後台登入：簡易密碼（登入狀態存 localStorage，登出清除）
+    const ADMIN_PW = '2026';
+    const ADMIN_AUTH_KEY = 'xyg-admin-auth';
 
     // 建立 品項id -> 分類 對照
     const ITEM_CAT = {};
@@ -307,9 +304,8 @@
           <div class="pin-box">
             <div style="font-size:34px;">🔐</div>
             <h3 style="font-size:18px;font-weight:900;margin:6px 0 2px;">管理後台登入</h3>
-            <div style="font-size:13px;color:var(--ink-soft);margin-bottom:16px;">請以管理員帳號登入以查看營業數據</div>
-            <input id="login-email" type="email" placeholder="Email" autocomplete="username" style="text-align:left;letter-spacing:normal;margin-bottom:8px;" />
-            <input id="login-pw" type="password" placeholder="密碼" autocomplete="current-password" style="text-align:left;letter-spacing:normal;" />
+            <div style="font-size:13px;color:var(--ink-soft);margin-bottom:16px;">請輸入管理密碼</div>
+            <input id="login-pw" type="password" inputmode="numeric" placeholder="密碼" autocomplete="current-password" style="text-align:left;letter-spacing:normal;" />
             <div id="login-err" class="pin-err" style="display:${errMsg ? 'block' : 'none'};">${errMsg || ''}</div>
             <div class="pin-actions">
               <a href="customer.html" style="flex:1;border:1.5px solid var(--line);background:#fff;color:var(--ink-soft);font-weight:700;padding:11px;border-radius:12px;text-decoration:none;display:flex;align-items:center;justify-content:center;">返回</a>
@@ -318,21 +314,20 @@
           </div>
         </div>
       `;
-      const email = document.getElementById('login-email');
       const pw = document.getElementById('login-pw');
       const btn = document.getElementById('login-submit');
       const submit = () => {
-        if (!auth) { renderLogin('目前無法連線，請檢查網路後再試'); return; }
-        if (!email.value.trim() || !pw.value) { renderLogin('請輸入 Email 與密碼'); return; }
-        btn.disabled = true;
-        btn.textContent = '登入中…';
-        auth.signInWithEmailAndPassword(email.value.trim(), pw.value)
-          .catch(() => renderLogin('帳號或密碼錯誤'));
-        // 成功會由 onAuthStateChanged 接手切換到儀表板
+        if (pw.value === ADMIN_PW) {
+          unlocked = true;
+          try { localStorage.setItem(ADMIN_AUTH_KEY, '1'); } catch (e) {}
+          renderAdmin();
+        } else {
+          renderLogin('密碼錯誤');
+        }
       };
       btn.addEventListener('click', submit);
       pw.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
-      email.focus();
+      pw.focus();
     }
 
     function renderOffline() {
@@ -394,7 +389,7 @@
       cook: { label: '製作中', color: '#3E9BD1', bg: '#E3F1FB' },
       done: { label: '完成', color: '#3FA877', bg: '#E1F4EA' },
     };
-    const isPaid = o => (o.pay && o.pay.paid) || o.status === 'done';
+    const isPaid = o => !!(o.pay && o.pay.paid);
     const nameOf = it => it.name || (getItem(it.id) ? getItem(it.id).name : '(未知)');
     const priceOf = it => (it.price != null ? it.price : (getItem(it.id) ? getItem(it.id).price : 0));
     function catNameOf(it) {
@@ -654,7 +649,7 @@
       const rowsHtml = list.map(o => {
         const st = STATUS[o.status] || STATUS.new;
         const pd = o.pay && o.pay.paid;
-        const payLabel = pd ? (o.pay.method === 'cash' ? '💵 現金' : '📱 行動') : (o.status === 'done' ? '已完成' : '未結');
+        const payLabel = pd ? (o.pay.method === 'cash' ? '💵 現金' : '📱 行動') : '未結';
         const when = histScope === 'today' ? fmtTime(o.createdAt) : (fmtDate(o.createdAt) + ' ' + fmtTime(o.createdAt));
         return `<tr>
           <td style="font-weight:900;color:var(--pink);">${o.no}</td>
@@ -738,7 +733,7 @@
 
     function bindAdmin() {
       const logout = document.getElementById('logout-btn');
-      if (logout) logout.addEventListener('click', () => { if (auth) auth.signOut(); });
+      if (logout) logout.addEventListener('click', () => { unlocked = false; try { localStorage.removeItem(ADMIN_AUTH_KEY); } catch (e) {} renderLogin(); });
       app.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { aTab = b.dataset.tab; renderAdmin(); }));
       app.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => handleAction(b)));
     }
@@ -823,15 +818,8 @@
     }
 
     // ---------- 啟動 ----------
-    if (auth) {
-      auth.onAuthStateChanged(user => {
-        unlocked = !!user;
-        if (unlocked) renderAdmin();
-        else renderLogin();
-      });
-    } else {
-      renderOffline();
-    }
+    try { unlocked = localStorage.getItem(ADMIN_AUTH_KEY) === '1'; } catch (e) { unlocked = false; }
+    if (unlocked) renderAdmin(); else renderLogin();
 
     initSync(list => {
       orders = list;

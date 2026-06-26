@@ -64,11 +64,12 @@
 
     function renderCashier() {
       const todayOrders = orders.filter(order => isToday(order.createdAt));
-      const paid = todayOrders.filter(order => order.status === 'done');
-      const unpaid = todayOrders.filter(order => order.status !== 'done');
-      
-      const totalRevenue = paid.reduce((sum, order) => sum + order.total, 0);
-      const totalPending = unpaid.reduce((sum, order) => sum + order.total, 0);
+      const isPaid = o => !!(o.pay && o.pay.paid);
+      const paid = todayOrders.filter(isPaid);
+      const unpaid = todayOrders.filter(o => !isPaid(o));
+
+      const totalRevenue = paid.reduce((sum, order) => sum + (order.total || 0), 0);
+      const totalPending = unpaid.reduce((sum, order) => sum + (order.total || 0), 0);
 
       const cardsHtml = unpaid.length === 0 ?
         '<div class="stat-card" style="grid-column:1/-1;">目前沒有待結帳的訂單。已完成的訂單已移至管理後台「歷史訂單」。</div>' :
@@ -77,8 +78,8 @@
       app.innerHTML = `
         <div class="stats-grid">
           ${renderStat('今日訂單', todayOrders.length)}
-          ${renderStat('未取餐', unpaid.length, 'var(--amber)')}
-          ${renderStat('已取餐', paid.length, 'var(--green)')}
+          ${renderStat('未結帳', unpaid.length, 'var(--amber)')}
+          ${renderStat('已結帳', paid.length, 'var(--green)')}
           ${renderStat('應收金額', '$' + totalPending, 'var(--pink)')}
         </div>
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
@@ -139,8 +140,8 @@
           </div>
           <div class="order-footer">
             <span style="font-weight:900;color:var(--pink);">$${order.total}</span>
-            ${order.status === 'done'
-              ? `<span style="font-weight:700;color:var(--green);">${order.pay && order.pay.method === 'cash' ? '💵 已收現金' : order.pay && order.pay.method === 'mobile' ? '📱 已收行動' : '✔️ 已完成'}</span>`
+            ${(order.pay && order.pay.paid)
+              ? `<span style="font-weight:700;color:var(--green);">${order.pay.method === 'cash' ? '💵 已收現金' : '📱 已收行動'}</span>`
               : `<div style="display:flex;gap:6px;">
                    <button class="pill-button" style="border-color:var(--green);color:var(--green);" data-action="pay-cash" data-id="${order.id}">💵 現金</button>
                    <button class="pill-button" style="border-color:var(--blue);color:var(--blue);" data-action="pay-mobile" data-id="${order.id}">📱 行動</button>
@@ -164,11 +165,10 @@
         const id = btn.dataset.id;
         const method = action === 'pay-cash' ? 'cash' : 'mobile';
         const order = orders.find(o => o.id === id);
-        if (order && order.status !== 'done') {
-          order.status = 'done'; // 樂觀更新
-          order.pay = { method, paid: true };
+        if (order && !(order.pay && order.pay.paid)) {
+          order.pay = { method, paid: true }; // 樂觀更新（只改付款，不動製作狀態）
           renderCashier();
-          syncUpdateOrder(id, { status: 'done', pay: { method, paid: true }, updatedAt: Date.now() });
+          syncUpdateOrder(id, { pay: { method, paid: true }, updatedAt: Date.now() });
         }
       }
     }

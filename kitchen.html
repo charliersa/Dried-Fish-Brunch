@@ -54,7 +54,7 @@
         total: todayOrders.length,
         new: active.filter(order => order.status === 'new').length,
         cook: active.filter(order => order.status === 'cook').length,
-        revenue: doneOrders.reduce((sum, order) => sum + order.total, 0),
+        done: doneOrders.length,
       };
 
       const cardsHtml = active.length === 0 ?
@@ -66,7 +66,7 @@
           ${renderStat('今日訂單', stats.total)}
           ${renderStat('待製作', stats.new, 'var(--amber)')}
           ${renderStat('製作中', stats.cook, 'var(--blue)')}
-          ${renderStat('已完成營收', '$' + stats.revenue, 'var(--green)')}
+          ${renderStat('今日完成', stats.done, 'var(--green)')}
         </div>
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
           <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);">${syncModeLabel()} · 自動更新</div>
