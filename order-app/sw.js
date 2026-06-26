@@ -1,5 +1,5 @@
 // 顧客手機點餐 App（獨立版）Service Worker
-const CACHE_NAME = 'xyg-customer-pwa-v5';
+const CACHE_NAME = 'xyg-customer-pwa-v6';
 const ASSETS = [
   './',
   './index.html',
