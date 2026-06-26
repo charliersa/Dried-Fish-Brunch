@@ -70,9 +70,9 @@
       const totalRevenue = paid.reduce((sum, order) => sum + order.total, 0);
       const totalPending = unpaid.reduce((sum, order) => sum + order.total, 0);
 
-      const cardsHtml = todayOrders.length === 0 ?
-        '<div class="stat-card" style="grid-column:1/-1;">目前沒有訂單。</div>' :
-        `<div class="order-grid">${todayOrders.map(order => renderCashierCard(order)).join('')}</div>`;
+      const cardsHtml = unpaid.length === 0 ?
+        '<div class="stat-card" style="grid-column:1/-1;">目前沒有待結帳的訂單。已完成的訂單已移至管理後台「歷史訂單」。</div>' :
+        `<div class="order-grid">${unpaid.map(order => renderCashierCard(order)).join('')}</div>`;
 
       app.innerHTML = `
         <div class="stats-grid">

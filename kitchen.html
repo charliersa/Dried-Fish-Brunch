@@ -57,9 +57,9 @@
         revenue: doneOrders.reduce((sum, order) => sum + order.total, 0),
       };
 
-      const cardsHtml = todayOrders.length === 0 ?
-        '<div class="stat-card" style="grid-column:1/-1;">目前沒有待處理的訂單，請等待顧客下單。</div>' :
-        `<div class="order-grid">${todayOrders.map(order => renderKitchenCard(order)).join('')}</div>`;
+      const cardsHtml = active.length === 0 ?
+        '<div class="stat-card" style="grid-column:1/-1;">目前沒有待處理的訂單。已完成的訂單已移至管理後台「歷史訂單」。</div>' :
+        `<div class="order-grid">${active.map(order => renderKitchenCard(order)).join('')}</div>`;
 
       app.innerHTML = `
         <div class="stats-grid">
