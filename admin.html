@@ -626,7 +626,7 @@
           const off = it.active === false, so = !!it.soldOut;
           return `
           <div class="ent-row" style="opacity:${off ? .5 : 1};">
-            <div style="font-weight:700;">${escapeHtml(it.name)} <span style="color:var(--ink-soft);font-weight:400;">$${it.price}</span>${so ? ' <span class="badge" style="background:#fcf1dc;color:#e89a2b;">售完</span>' : ''}</div>
+            <div style="font-weight:700;">${escapeHtml(it.name)} <span style="color:var(--ink-soft);font-weight:400;">$${it.price}</span>${so ? ' <span class="badge" style="background:#fcf1dc;color:#e89a2b;">售完</span>' : ''}${(it.opts && it.opts.length) ? `<div style="font-size:11px;color:var(--ink-soft);font-weight:400;margin-top:2px;">📝 ${it.opts.map(escapeHtml).join('、')}</div>` : ''}</div>
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
               <button class="mini-btn" data-action="item-active" data-cat="${cat.id}" data-id="${it.id}">${off ? '上架' : '下架'}</button>
               <button class="mini-btn" data-action="item-sold" data-cat="${cat.id}" data-id="${it.id}" style="background:${so ? '#e1f4ea' : '#fcf1dc'};color:${so ? '#3fa877' : '#e89a2b'};border:none;">${so ? '補貨' : '售完'}</button>
@@ -697,6 +697,8 @@
             <h3 style="font-size:17px;font-weight:900;margin:0 0 14px;">${editItem.isNew ? '新增品項' : '編輯品項'}</h3>
             <input id="item-name" placeholder="品名" value="${escapeHtml(editItem.name || '')}" style="text-align:left;letter-spacing:normal;margin-bottom:8px;" />
             <input id="item-price" type="number" placeholder="價格" value="${editItem.price != null ? editItem.price : ''}" style="text-align:left;letter-spacing:normal;" />
+            <textarea id="item-opts" placeholder="備註選項（一行一個，例：&#10;不要沙拉&#10;不要蕃茄醬）" style="width:100%;min-height:96px;margin-top:8px;border:1.5px solid var(--line);border-radius:12px;padding:11px 14px;font:inherit;color:var(--ink);outline:none;box-sizing:border-box;resize:vertical;text-align:left;letter-spacing:normal;">${escapeHtml(editItem.opts || '')}</textarea>
+            <div style="font-size:12px;color:var(--ink-soft);margin-top:4px;text-align:left;">顧客點此品項時可一鍵勾選；留空則用該分類預設選項。</div>
             <div class="pin-actions">
               <button class="pill-button" style="flex:1;" data-action="item-cancel">取消</button>
               <button data-action="item-save" style="flex:1;border:none;background:var(--pink);color:#fff;font-weight:900;padding:11px;border-radius:12px;">儲存</button>
@@ -749,8 +751,8 @@
       else if (a === 'item-active') { toggleItem(cat, id, 'active'); }
       else if (a === 'item-sold') { toggleItem(cat, id, 'soldOut'); }
       else if (a === 'item-del') { if (confirm('確定刪除此品項？')) deleteItem(cat, id); }
-      else if (a === 'item-edit') { const it = findItem(cat, id); editItem = { catId: cat, id, name: it.name, price: it.price, isNew: false }; renderAdmin(); }
-      else if (a === 'item-add') { editItem = { catId: cat, name: '', price: '', isNew: true }; renderAdmin(); }
+      else if (a === 'item-edit') { const it = findItem(cat, id); editItem = { catId: cat, id, name: it.name, price: it.price, opts: (it.opts || []).join('\n'), isNew: false }; renderAdmin(); }
+      else if (a === 'item-add') { editItem = { catId: cat, name: '', price: '', opts: '', isNew: true }; renderAdmin(); }
       else if (a === 'item-cancel') { editItem = null; renderAdmin(); }
       else if (a === 'item-save') { saveItem(); }
       else if (a === 'ent-add') { openEnt(kind, null); }
@@ -776,12 +778,14 @@
     function saveItem() {
       const name = (document.getElementById('item-name').value || '').trim();
       const price = parseInt(document.getElementById('item-price').value, 10);
+      const optsEl = document.getElementById('item-opts');
+      const opts = ((optsEl && optsEl.value) || '').split('\n').map(s => s.trim()).filter(Boolean);
       if (!name || !(price >= 0)) { showMessage('請填寫品名與價格'); return; }
       if (editItem.isNew) {
         const nid = 'x' + Date.now();
-        cfg.menu = cfg.menu.map(c => c.id !== editItem.catId ? c : Object.assign({}, c, { items: [...c.items, { id: nid, name, price, active: true, soldOut: false }] }));
+        cfg.menu = cfg.menu.map(c => c.id !== editItem.catId ? c : Object.assign({}, c, { items: [...c.items, { id: nid, name, price, opts, active: true, soldOut: false }] }));
       } else {
-        cfg.menu = cfg.menu.map(c => c.id !== editItem.catId ? c : Object.assign({}, c, { items: c.items.map(i => i.id !== editItem.id ? i : Object.assign({}, i, { name, price })) }));
+        cfg.menu = cfg.menu.map(c => c.id !== editItem.catId ? c : Object.assign({}, c, { items: c.items.map(i => i.id !== editItem.id ? i : Object.assign({}, i, { name, price, opts })) }));
       }
       editItem = null; saveMenu(cfg.menu); renderAdmin();
     }

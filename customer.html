@@ -444,8 +444,8 @@
             ` : ''}
             <div style="font-weight:700;margin:6px 0;">餐點備註</div>
             ${(() => {
-              const opts = noteOptionsFor(category ? category.id : '');
-              return opts.length ? `<div class="opt-grid">${opts.map(o => `<button class="opt-chip ${state.itemOptions.includes(o) ? 'active' : ''}" data-action="item-opt" data-opt="${o}">${state.itemOptions.includes(o) ? '✕ ' : ''}${o}</button>`).join('')}</div>` : '';
+              const opts = (item.opts && item.opts.length) ? item.opts : noteOptionsFor(category ? category.id : '');
+              return opts.length ? `<div class="opt-grid">${opts.map(o => `<button class="opt-chip ${state.itemOptions.includes(o) ? 'active' : ''}" data-action="item-opt" data-opt="${escapeHtml(o)}">${state.itemOptions.includes(o) ? '✕ ' : ''}${escapeHtml(o)}</button>`).join('')}</div>` : '';
             })()}
             <input id="item-note-input" class="input-group" placeholder="其他備註（例：醬多一點、餐點切塊）" value="${escapeHtml(state.itemNote || '')}">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-top:18px;">
