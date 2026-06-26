@@ -459,7 +459,7 @@
       const payload = {
         date: dateStr, store: '小魚乾早午餐',
         summary: { count: r.count, paidCount: r.paidCount, unpaidCount: r.unpaidCount, revenue: r.revenue, cashCount: r.cashCount, cashSum: r.cashSum, mobileCount: r.mobileCount, mobileSum: r.mobileSum },
-        orders: r.day.map(o => ({ no: o.no, time: fmtTime(o.createdAt), type: o.type, table: o.table || '', phone: o.phone || '', items: orderItemsText(o), note: o.note || '', total: o.total || 0, pay: payText(o) })),
+        orders: r.day.map(o => ({ no: o.no, time: fmtTime(o.createdAt), typeTable: o.type + ' · ' + (o.table || ''), status: (STATUS[o.status] || {}).label || o.status || '', pay: payText(o), total: o.total || 0 })),
         items: r.items
       };
       try {
