@@ -366,6 +366,12 @@
         }
       }
 
+      const closed = isOrderingClosed();
+      const closedBanner = closed ? `
+        <div style="background:#fdecea;border:1.5px solid #e5534b;color:#b3322b;border-radius:14px;padding:12px 14px;margin-bottom:12px;font-weight:700;text-align:center;">
+          🕛 今日已結單（${escapeHtml(getCloseTime())} 後停止點餐），感謝您的光臨！
+        </div>` : '';
+
       const cats = visibleCategories();
       const catBar = `
         <div class="cat-bar">
@@ -390,6 +396,7 @@
             <input id="phone-member" type="tel" inputmode="numeric" maxlength="10" placeholder="輸入手機（會員，例：0912345678）" value="${escapeHtml(state.memberPhone)}" class="input-group" style="border:none;background:transparent;color:var(--ink);flex:1;">
           </div>
         </div>
+        ${closedBanner}
         <div class="toggle-row">
           <button class="${state.diningType === '內用' ? 'active' : ''}" data-action="set-dining" data-type="內用">🍽️ 內用</button>
           <button class="${state.diningType === '外帶' ? 'active' : ''}" data-action="set-dining" data-type="外帶">🛍️ 外帶</button>
@@ -526,6 +533,20 @@
     }
 
     function renderConfirmation(order) {
+      if (order.rejected) {
+        app.innerHTML = `
+          <div style="background:#fff;border-radius:22px;padding:24px;box-shadow:0 4px 14px rgba(28,94,122,.1);text-align:center;">
+            <div style="font-size:40px;">😢</div>
+            <h2 style="margin:6px 0 2px;font-weight:900;color:#e5534b;">訂單未被接受</h2>
+            <div style="color:var(--ink-soft);font-size:14px;">取餐號碼 ${escapeHtml(order.no)}</div>
+            <div style="font-size:14px;color:var(--ink);margin-top:14px;">很抱歉，本次訂單未能接受${order.rejectReason ? `：<span style="color:#e5534b;font-weight:700;">${escapeHtml(order.rejectReason)}</span>` : '，請洽櫃台或重新點餐。'}</div>
+            <button class="button-primary" data-action="new-order" style="width:100%;margin-top:18px;background:var(--pink);color:#fff;font-weight:800;justify-content:center;">重新點餐</button>
+          </div>
+        `;
+        attachEvents();
+        updateCartBar();
+        return;
+      }
       const stepOrder = ['new', 'cook', 'done'];
       const stepMap = {
         new: { label: '新訂單', color: 'var(--amber)', icon: '🔔' },
@@ -721,6 +742,11 @@
       if (state.submitting) return; // 防連點：避免一次送出產生重複訂單
       if (cartCount() === 0) {
         showMessage('請先加入餐點');
+        return;
+      }
+      if (isOrderingClosed()) {
+        showMessage('今日已結單（' + getCloseTime() + ' 後停止點餐），請洽櫃台');
+        renderCustomer();
         return;
       }
       const phone = (state.phone || state.memberPhone || '').trim();

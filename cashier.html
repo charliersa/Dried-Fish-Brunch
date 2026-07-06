@@ -65,7 +65,7 @@
     let orders = loadOrders();
 
     function renderCashier() {
-      const todayOrders = orders.filter(order => isToday(order.createdAt));
+      const todayOrders = orders.filter(order => isToday(order.createdAt) && !order.rejected);
       const isPaid = o => !!(o.pay && o.pay.paid);
       const paid = todayOrders.filter(isPaid);
       const unpaid = todayOrders.filter(o => !isPaid(o));

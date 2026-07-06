@@ -1,0 +1,21 @@
+{
+  "name": "小魚乾早午餐 · 內場製作台",
+  "short_name": "內場製作台",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#e6f4fa",
+  "theme_color": "#1c5e7a",
+  "description": "小魚乾早午餐內場（廚房）製作畫面，即時同步主系統訂單，可開始製作／完成／拒單。",
+  "icons": [
+    {
+      "src": "icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}

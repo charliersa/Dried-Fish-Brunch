@@ -271,6 +271,12 @@
 
   <style>
     #print-area { display: none; }
+    /* 螢幕上的列印預覽：先看再按「列印 / 另存 PDF」 */
+    body.preview-open { overflow: hidden; }
+    body.preview-open #print-area { display: block; position: fixed; inset: 0; z-index: 200; background: #fff; overflow: auto; padding: 0 24px 32px; }
+    .rpt-toolbar { position: sticky; top: 0; background: #fff; border-bottom: 1px solid #e3eef3; padding: 12px 0; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .rpt-toolbar button { border: none; border-radius: 999px; padding: 9px 16px; font-weight: 800; font-size: 14px; cursor: pointer; }
+    .rpt-toolbar .rpt-hint { font-size: 12px; color: #888; }
     #print-area .rpt-h1 { font-size: 22px; color: #1c5e7a; border-bottom: 3px solid #ec6398; padding-bottom: 6px; margin: 0 0 4px; }
     #print-area .rpt-h2 { font-size: 16px; color: #1c5e7a; border-left: 5px solid #ec6398; padding-left: 8px; margin: 16px 0 6px; }
     #print-area .rpt-sub { color: #666; margin-bottom: 8px; font-size: 12px; }
@@ -279,7 +285,9 @@
     #print-area th { background: #eee; }
     @media print {
       body > .page, #toast { display: none !important; }
-      #print-area { display: block !important; }
+      body.preview-open { overflow: visible !important; }
+      #print-area { display: block !important; position: static !important; padding: 0 !important; overflow: visible !important; }
+      .rpt-toolbar { display: none !important; }
       @page { margin: 12mm; }
     }
   </style>
@@ -391,6 +399,7 @@
     let editItem = null; // 菜單品項編輯
     let editEnt = null;  // 員工/食材/設備/成本編輯
     let histScope = 'today';
+    let reportPeriod = 'day'; // 報表期間：day | week | month
 
     const ADMIN_TABS = [
       { k: 'revenue', label: '營收管理' }, { k: 'ops', label: '營運管理' }, { k: 'cost', label: '成本管理' },
@@ -415,7 +424,7 @@
 
     // 整理某一天的報表資料（訂單明細 + 金額合計 + 現金/行動分類 + 品項統計）
     function buildReportData(dateStr) {
-      const day = orders.filter(o => dayKey(o.createdAt) === dateStr).sort((a, b) => a.createdAt - b.createdAt);
+      const day = orders.filter(o => dayKey(o.createdAt) === dateStr && !o.rejected).sort((a, b) => a.createdAt - b.createdAt);
       const paid = day.filter(isPaid);
       const cash = paid.filter(o => o.pay && o.pay.method === 'cash');
       const mobile = paid.filter(o => o.pay && o.pay.method === 'mobile');
@@ -431,23 +440,142 @@
     }
     const payText = o => (o.pay && o.pay.paid) ? (o.pay.method === 'cash' ? '現金' : '行動') : '未結';
 
-    // 列印當日報表（頁內列印，不開新視窗，避免被彈出視窗封鎖器擋掉）
+    // 依日期＋期間（day/week/month）算出起訖與標題
+    function periodRange(dateStr, period) {
+      const p = dateStr.split('-').map(Number);
+      const y = p[0], m = p[1], d = p[2];
+      let start, end, label;
+      if (period === 'week') {
+        const dow = (new Date(y, m - 1, d).getDay() + 6) % 7; // 週一=0
+        start = new Date(y, m - 1, d - dow);
+        end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+        label = '週報　' + dayKey(start) + ' ～ ' + dayKey(end);
+      } else if (period === 'month') {
+        start = new Date(y, m - 1, 1);
+        end = new Date(y, m, 0);
+        label = '月報　' + y + '-' + String(m).padStart(2, '0');
+      } else {
+        start = new Date(y, m - 1, d);
+        end = new Date(y, m - 1, d);
+        label = '日報　' + dateStr;
+      }
+      start.setHours(0, 0, 0, 0); end.setHours(23, 59, 59, 999);
+      return { start, end, label };
+    }
+
+    // 整理某一期間（日/週/月）的完整報表：營收/訂單/品項=真實歷史；成本/薪資/食材/設備=本月或目前快照
+    function buildPeriodReport(dateStr, period) {
+      const rg = periodRange(dateStr, period);
+      const s = rg.start.getTime(), e = rg.end.getTime();
+      const day = orders.filter(o => o.createdAt >= s && o.createdAt <= e && !o.rejected).sort((a, b) => a.createdAt - b.createdAt);
+      const paid = day.filter(isPaid);
+      const cash = paid.filter(o => o.pay && o.pay.method === 'cash');
+      const mobile = paid.filter(o => o.pay && o.pay.method === 'mobile');
+      const sum = arr => arr.reduce((acc, o) => acc + (o.total || 0), 0);
+      const dineIn = day.filter(o => o.type === '內用').length;
+      const takeout = day.length - dineIn;
+
+      // 逐日明細
+      const byDay = {};
+      day.forEach(o => { const k = dayKey(o.createdAt); if (!byDay[k]) byDay[k] = { count: 0, revenue: 0, paidCount: 0 }; byDay[k].count++; if (isPaid(o)) { byDay[k].revenue += o.total || 0; byDay[k].paidCount++; } });
+      const perDay = Object.keys(byDay).sort().map(k => ({ date: k, count: byDay[k].count, paidCount: byDay[k].paidCount, revenue: byDay[k].revenue }));
+
+      // 品項統計
+      const stat = {};
+      day.forEach(o => (o.items || []).forEach(it => { const n = nameOf(it); if (!stat[n]) stat[n] = { qty: 0, rev: 0 }; stat[n].qty += it.qty; stat[n].rev += priceOf(it) * it.qty; }));
+      const items = Object.keys(stat).map(n => ({ name: n, qty: stat[n].qty, rev: stat[n].rev })).sort((a, b) => b.qty - a.qty);
+
+      // 分類營收（已結帳）
+      const catMap = {};
+      paid.forEach(o => (o.items || []).forEach(it => { const cn = catNameOf(it); catMap[cn] = (catMap[cn] || 0) + priceOf(it) * it.qty; }));
+      const cats = Object.keys(catMap).map(n => ({ name: n, value: catMap[n] })).sort((a, b) => b.value - a.value);
+
+      // 管理模組快照（本月／目前設定值）
+      const ent = (cfg && cfg.ent) || {};
+      const costs = ent.costs || [];
+      const costTotal = costs.reduce((acc, c) => acc + (c.amount || 0), 0);
+      const staffRows = (ent.staff || []).map(st => ({ name: st.name, role: st.role, wage: st.wage, hours: st.hours, pay: (st.wage || 0) * (st.hours || 0) }));
+      const payrollTotal = staffRows.reduce((acc, r) => acc + r.pay, 0);
+      const ingredients = ent.ingredients || [];
+      const equipment = ent.equipment || [];
+      const revenue = sum(paid);
+
+      return {
+        label: rg.label, period, start: rg.start, end: rg.end,
+        count: day.length, paidCount: paid.length, unpaidCount: day.length - paid.length,
+        revenue, cashCount: cash.length, cashSum: sum(cash), mobileCount: mobile.length, mobileSum: sum(mobile),
+        dineIn, takeout, day, perDay, items, cats,
+        costs, costTotal, staffRows, payrollTotal, ingredients, equipment,
+        profit: revenue - costTotal - payrollTotal,
+      };
+    }
+
+    // 營運報表預覽（日/週/月）：頁內預覽 → 列印或另存 PDF
     function printDayReport(dateStr) {
       if (!dateStr) { showMessage('請選擇日期'); return; }
-      const r = buildReportData(dateStr);
+      const r = buildPeriodReport(dateStr, reportPeriod);
+      const isMonth = reportPeriod === 'month';
+      const periodWord = reportPeriod === 'month' ? '本月' : reportPeriod === 'week' ? '本週' : '當日';
+
       const sumRows = `
-        <table><tr><th>總訂單數</th><td>${r.count} 筆</td><th>已結帳</th><td>${r.paidCount} 筆</td><th>未結帳</th><td>${r.unpaidCount} 筆</td></tr>
-        <tr><th>總營收</th><td>$${r.revenue}</td><th>💵 現金</th><td>$${r.cashSum}（${r.cashCount}筆）</td><th>📱 行動</th><td>$${r.mobileSum}（${r.mobileCount}筆）</td></tr></table>`;
+        <table>
+          <tr><th>${periodWord}訂單數</th><td>${r.count} 筆</td><th>已結帳</th><td>${r.paidCount} 筆</td><th>未結帳</th><td>${r.unpaidCount} 筆</td></tr>
+          <tr><th>${periodWord}營收</th><td>$${r.revenue}</td><th>💵 現金</th><td>$${r.cashSum}（${r.cashCount}筆）</td><th>📱 行動</th><td>$${r.mobileSum}（${r.mobileCount}筆）</td></tr>
+          <tr><th>內用</th><td>${r.dineIn} 筆</td><th>外帶</th><td>${r.takeout} 筆</td><th>平均客單</th><td>$${r.paidCount ? Math.round(r.revenue / r.paidCount) : 0}</td></tr>
+        </table>`;
+
+      const perDayRows = r.perDay.length ? r.perDay.map(d => `<tr><td>${d.date}</td><td style="text-align:right">${d.count}</td><td style="text-align:right">${d.paidCount}</td><td style="text-align:right">$${d.revenue}</td></tr>`).join('') : '<tr><td colspan="4">本期間無訂單</td></tr>';
+      const perDaySection = reportPeriod === 'day' ? '' : `
+        <div class="rpt-h2">逐日明細</div>
+        <table><tr><th>日期</th><th style="text-align:right">訂單數</th><th style="text-align:right">已結帳</th><th style="text-align:right">營收</th></tr>${perDayRows}
+        <tr><th>合計</th><th style="text-align:right">${r.count}</th><th style="text-align:right">${r.paidCount}</th><th style="text-align:right">$${r.revenue}</th></tr></table>`;
+
       const itemRows = r.items.length ? r.items.map(it => `<tr><td>${escapeHtml(it.name)}</td><td style="text-align:right">${it.qty}</td><td style="text-align:right">$${it.rev}</td></tr>`).join('') : '<tr><td colspan="3">無</td></tr>';
-      const orderRows = r.day.length ? r.day.map(o => `<tr><td>${escapeHtml(o.no)}</td><td>${fmtTime(o.createdAt)}</td><td>${o.type} ${escapeHtml(o.table || '')}</td><td>${escapeHtml(orderItemsText(o))}</td><td>${payText(o)}</td><td style="text-align:right">$${o.total}</td></tr>`).join('') : '<tr><td colspan="6">當日無訂單</td></tr>';
+      const catRows = r.cats.length ? r.cats.map(c => `<tr><td>${escapeHtml(c.name)}</td><td style="text-align:right">$${c.value}</td></tr>`).join('') : '<tr><td colspan="2">無</td></tr>';
+      const orderRows = r.day.length ? r.day.map(o => `<tr><td>${escapeHtml(o.no)}</td><td>${reportPeriod === 'day' ? fmtTime(o.createdAt) : (fmtDate(o.createdAt) + ' ' + fmtTime(o.createdAt))}</td><td>${o.type} ${escapeHtml(o.table || '')}</td><td>${escapeHtml(orderItemsText(o))}</td><td>${payText(o)}</td><td style="text-align:right">$${o.total}</td></tr>`).join('') : '<tr><td colspan="6">本期間無訂單</td></tr>';
+
+      const costRows = r.costs.length ? r.costs.map(c => `<tr><td>${escapeHtml(c.label)}</td><td style="text-align:right">$${c.amount}</td></tr>`).join('') : '<tr><td colspan="2">無</td></tr>';
+      const staffRows = r.staffRows.length ? r.staffRows.map(s => `<tr><td>${escapeHtml(s.name)}</td><td>${escapeHtml(s.role || '')}</td><td style="text-align:right">$${s.wage}</td><td style="text-align:right">${s.hours}</td><td style="text-align:right">$${s.pay}</td></tr>`).join('') : '<tr><td colspan="5">無</td></tr>';
+      const ingRows = r.ingredients.length ? r.ingredients.map(g => `<tr><td>${escapeHtml(g.name)}</td><td style="text-align:right">${g.stock} ${escapeHtml(g.unit || '')}</td><td style="text-align:right">${g.lowAt}</td><td>${(g.stock <= g.lowAt) ? '⚠️ 偏低' : '正常'}</td><td>${escapeHtml(g.supplier || '')}</td></tr>`).join('') : '<tr><td colspan="5">無</td></tr>';
+      const eqRows = r.equipment.length ? r.equipment.map(q => `<tr><td>${escapeHtml(q.name)}</td><td>${escapeHtml(q.status || '')}</td><td>${escapeHtml(q.lastService || '')}</td></tr>`).join('') : '<tr><td colspan="3">無</td></tr>';
+
+      const profitSection = `
+        <div class="rpt-h2">簡易損益${isMonth ? '（月）' : ''}</div>
+        <table>
+          <tr><th>${periodWord}營收</th><td style="text-align:right">$${r.revenue}</td></tr>
+          <tr><th>本月成本</th><td style="text-align:right">－$${r.costTotal}</td></tr>
+          <tr><th>本月薪資</th><td style="text-align:right">－$${r.payrollTotal}</td></tr>
+          <tr><th>結餘（營收－成本－薪資）</th><td style="text-align:right;font-weight:900;color:${r.profit >= 0 ? '#1c5e7a' : '#e5534b'};">$${r.profit}</td></tr>
+          <tr><th>毛利率（結餘 ÷ 營收）</th><td style="text-align:right;font-weight:900;color:${r.profit >= 0 ? '#1c5e7a' : '#e5534b'};">${r.revenue > 0 ? Math.round(r.profit / r.revenue * 100) : 0}%</td></tr>
+        </table>
+        ${isMonth ? '' : '<div class="rpt-sub">※ 成本與薪資為「本月固定值」，與本期間營收相比僅供參考；損益建議看「月報」。</div>'}`;
+
       const area = document.getElementById('print-area');
       area.innerHTML = `
-        <div class="rpt-h1">🐟 小魚乾早午餐 · 每日報表</div>
-        <div class="rpt-sub">日期：${dateStr}　列印時間：${fmtTime(Date.now())}</div>
+        <div class="rpt-toolbar">
+          <button id="rpt-print" style="background:var(--pink);color:#fff;">🖨️ 列印 / 另存 PDF</button>
+          <button id="rpt-close" style="background:#eef5f8;color:var(--ink);">✕ 關閉預覽</button>
+          <span class="rpt-hint">在列印視窗的「目的地 / 印表機」選「<b>另存為 PDF</b>」即可存成 PDF 檔</span>
+        </div>
+        <div class="rpt-h1">🐟 小魚乾早午餐 · 營運報表</div>
+        <div class="rpt-sub">${escapeHtml(r.label)}　列印時間：${fmtDate(Date.now())} ${fmtTime(Date.now())}</div>
+
         <div class="rpt-h2">營收摘要</div>${sumRows}
+        ${perDaySection}
         <div class="rpt-h2">品項銷售統計</div><table><tr><th>品項</th><th style="text-align:right">數量</th><th style="text-align:right">小計</th></tr>${itemRows}</table>
-        <div class="rpt-h2">訂單明細</div><table><tr><th>取餐號</th><th>時間</th><th>類型/桌號</th><th>品項</th><th>付款</th><th style="text-align:right">金額</th></tr>${orderRows}</table>`;
-      window.print();
+        <div class="rpt-h2">分類營收</div><table><tr><th>分類</th><th style="text-align:right">營收</th></tr>${catRows}</table>
+        <div class="rpt-h2">訂單明細</div><table><tr><th>取餐號</th><th>時間</th><th>類型/桌號</th><th>品項</th><th>付款</th><th style="text-align:right">金額</th></tr>${orderRows}</table>
+
+        <div class="rpt-h2">成本（本月）</div><table><tr><th>項目</th><th style="text-align:right">金額</th></tr>${costRows}<tr><th>合計</th><th style="text-align:right">$${r.costTotal}</th></tr></table>
+        <div class="rpt-h2">薪資（本月）</div><table><tr><th>姓名</th><th>職務</th><th style="text-align:right">時薪</th><th style="text-align:right">時數</th><th style="text-align:right">薪資</th></tr>${staffRows}<tr><th colspan="4">合計</th><th style="text-align:right">$${r.payrollTotal}</th></tr></table>
+        ${profitSection}
+
+        <div class="rpt-h2">食材庫存（目前）</div><table><tr><th>品名</th><th style="text-align:right">庫存</th><th style="text-align:right">安全量</th><th>狀態</th><th>供應商</th></tr>${ingRows}</table>
+        <div class="rpt-h2">設備狀態（目前）</div><table><tr><th>設備</th><th>狀態</th><th>上次保養</th></tr>${eqRows}</table>`;
+      document.body.classList.add('preview-open');
+      window.scrollTo(0, 0);
+      document.getElementById('rpt-print').addEventListener('click', () => window.print());
+      document.getElementById('rpt-close').addEventListener('click', () => { document.body.classList.remove('preview-open'); area.innerHTML = ''; });
     }
 
     // 同步當日報表到 Google Sheet（Apps Script Web App）
@@ -476,7 +604,7 @@
 
     // ---------- 各分頁內容 ----------
     function tabRevenue() {
-      const today = orders.filter(o => isToday(o.createdAt));
+      const today = orders.filter(o => isToday(o.createdAt) && !o.rejected);
       const paid = today.filter(isPaid);
       const revenue = paid.reduce((s, o) => s + (o.total || 0), 0);
       const doneC = today.filter(o => o.status === 'done').length;
@@ -567,8 +695,13 @@
       ];
       const costTotal = costRows.reduce((a, c) => a + c.amount, 0);
       const sameMonth = ts => { const d = new Date(ts); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); };
-      const monthRev = orders.filter(o => isPaid(o) && sameMonth(o.createdAt)).reduce((s, o) => s + (o.total || 0), 0);
+      const monthOrders = orders.filter(o => isPaid(o) && sameMonth(o.createdAt));
+      const monthRev = monthOrders.reduce((s, o) => s + (o.total || 0), 0);
+      const monthCount = monthOrders.length;
       const profit = monthRev - costTotal;
+      const margin = monthRev > 0 ? Math.round(profit / monthRev * 100) : 0; // 毛利率 %
+      const avgOrder = monthCount ? Math.round(monthRev / monthCount) : 0;    // 客單價
+      const avgProfit = monthCount ? Math.round(profit / monthCount) : 0;     // 平均每單利潤
       const maxCost = Math.max(1, ...costRows.map(c => c.amount));
 
       const bars = costRows.map(c => `
@@ -584,10 +717,16 @@
         </div>`).join('');
 
       return `
-        <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);">
+        <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);">
           ${renderStat('本月營收', money(monthRev), 'var(--green)')}
           ${renderStat('本月成本', money(costTotal), '#e5534b')}
           ${renderStat('本月毛利', money(profit), profit >= 0 ? 'var(--green)' : '#e5534b')}
+          ${renderStat('毛利率', margin + '%', margin >= 0 ? 'var(--green)' : '#e5534b')}
+        </div>
+        <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);">
+          ${renderStat('本月訂單數', monthCount)}
+          ${renderStat('客單價', money(avgOrder), 'var(--blue)')}
+          ${renderStat('平均每單利潤', money(avgProfit), avgProfit >= 0 ? 'var(--green)' : '#e5534b')}
         </div>
         <div class="admin-card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
@@ -693,7 +832,27 @@
     }
 
     function tabMenu() {
-      return cfg.menu.map(cat => {
+      const settingsBar = `
+        <div class="admin-card" style="margin-bottom:14px;">
+          <h3 style="margin:0 0 10px;">🏪 營業設定</h3>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <label style="font-size:13px;display:flex;align-items:center;gap:6px;font-weight:700;">
+              <input id="close-enabled" type="checkbox" ${cfg.closeEnabled ? 'checked' : ''} style="width:18px;height:18px;"> 啟用結單時間
+            </label>
+            <label style="font-size:13px;">結單時間</label>
+            <input id="close-time" type="time" value="${escapeHtml(cfg.closeTime || '11:50')}" style="border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;">
+            <button class="mini-btn" data-action="save-close-time">儲存</button>
+          </div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:8px;">
+            啟用後，超過結單時間顧客點餐頁會停止接單（廚房／收銀不受影響）。${cfg.closeEnabled ? '' : '<b style="color:#e5534b;">目前為暫停狀態（測試用）</b>，測試完勾選「啟用結單時間」再儲存即可恢復。'}
+          </div>
+        </div>`;
+      const addCatBar = `
+        <div class="admin-card" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+          <h3 style="margin:0;">📋 菜單大類</h3>
+          <button class="add-btn" data-action="cat-add">＋ 新增大類</button>
+        </div>`;
+      return settingsBar + addCatBar + cfg.menu.map(cat => {
         const items = cat.items.map(it => {
           const off = it.active === false, so = !!it.soldOut;
           return `
@@ -709,9 +868,13 @@
         }).join('');
         return `
           <div class="admin-card">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px;flex-wrap:wrap;">
               <h3 style="margin:0;">${cat.icon} ${escapeHtml(cat.name)}</h3>
-              <button class="add-btn" data-action="item-add" data-cat="${cat.id}">＋ 新增品項</button>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                <button class="mini-btn" data-action="cat-rename" data-cat="${cat.id}">✏️ 改名</button>
+                <button class="mini-btn" data-action="cat-del" data-cat="${cat.id}">🗑 刪除大類</button>
+                <button class="add-btn" data-action="item-add" data-cat="${cat.id}">＋ 新增品項</button>
+              </div>
             </div>
             ${items}
           </div>`;
@@ -724,29 +887,38 @@
       const rev = pool.filter(isPaid).reduce((s, o) => s + (o.total || 0), 0);
       const list = pool.slice().sort((a, b) => b.createdAt - a.createdAt);
       const rowsHtml = list.map(o => {
-        const st = STATUS[o.status] || STATUS.new;
+        const st = o.rejected ? { label: '已拒單', color: '#e5534b', bg: '#fdecea' } : (STATUS[o.status] || STATUS.new);
         const pd = o.pay && o.pay.paid;
-        const payLabel = pd ? (o.pay.method === 'cash' ? '💵 現金' : '📱 行動') : '未結';
+        const payLabel = o.rejected ? '—' : (pd ? (o.pay.method === 'cash' ? '💵 現金' : '📱 行動') : '未結');
         const when = histScope === 'today' ? fmtTime(o.createdAt) : (fmtDate(o.createdAt) + ' ' + fmtTime(o.createdAt));
+        const itemsText = orderItemsText(o) || '—';
         return `<tr>
           <td style="font-weight:900;color:var(--pink);">${o.no}</td>
           <td>${when}</td>
           <td>${o.type} · ${escapeHtml(o.table || '')}</td>
+          <td style="font-size:12px;color:var(--ink-soft);max-width:280px;white-space:normal;line-height:1.5;">${escapeHtml(itemsText)}${o.note ? `<div style="color:var(--amber);">📝 ${escapeHtml(o.note)}</div>` : ''}</td>
           <td><span class="badge" style="background:${st.bg};color:${st.color};">${st.label}</span></td>
           <td style="color:${pd ? '#3fa877' : '#9db4bf'};font-weight:700;">${payLabel}</td>
           <td style="font-weight:900;text-align:right;">$${o.total}</td>
+          <td style="text-align:center;"><button class="mini-btn" data-action="hist-del" data-id="${o.id}" style="background:#fdecea;color:#e5534b;border:none;">🗑 刪除</button></td>
         </tr>`;
       }).join('');
       const tbtn = on => `border-radius:999px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer;${on ? 'border:none;background:var(--ink);color:#fff;' : 'border:1.5px solid var(--line);background:#fff;color:var(--ink-soft);'}`;
       return `
         <div class="admin-card" style="margin-bottom:14px;">
-          <h3 style="margin:0 0 10px;">📑 每日報表</h3>
+          <h3 style="margin:0 0 10px;">📑 營運報表（日／週／月）</h3>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <label style="font-size:13px;">日期</label>
             <input type="date" id="hist-date" value="${dayKey(Date.now())}" style="border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;">
-            <button class="add-btn" data-action="hist-print">🖨️ 列印報表</button>
+            <div style="display:flex;gap:6px;">
+              <button data-action="rpt-day" style="${tbtn(reportPeriod === 'day')}">日報</button>
+              <button data-action="rpt-week" style="${tbtn(reportPeriod === 'week')}">週報</button>
+              <button data-action="rpt-month" style="${tbtn(reportPeriod === 'month')}">月報</button>
+            </div>
+            <button class="add-btn" data-action="hist-print">🖨️ 列印 / 另存 PDF</button>
             <button class="add-btn" data-action="hist-sync">📊 同步到 Google Sheet</button>
           </div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">營收／訂單／品項為真實歷史資料；成本／薪資／食材／設備為本月或目前設定值快照。</div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;">
             <label style="font-size:12px;color:var(--ink-soft);white-space:nowrap;">Google Sheet 連結</label>
             <input id="sheet-url" placeholder="貼上 Apps Script Web App 網址" value="${escapeHtml(cfg.sheetUrl || DEFAULT_SHEET_URL)}" style="flex:1;min-width:200px;border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;">
@@ -761,7 +933,7 @@
           <div style="font-size:14px;">營收：<b style="color:var(--green);">$${rev}</b> · 共 ${list.length} 筆</div>
         </div>
         <div class="admin-card">
-          ${list.length ? `<table class="hist-table"><thead><tr><th>單號</th><th>時間</th><th>類型 / 桌號</th><th>狀態</th><th>付款</th><th style="text-align:right;">金額</th></tr></thead><tbody>${rowsHtml}</tbody></table>` : '<div style="color:#9db4bf;padding:10px 0;">沒有訂單紀錄</div>'}
+          ${list.length ? `<table class="hist-table"><thead><tr><th>單號</th><th>時間</th><th>類型 / 桌號</th><th>品項</th><th>狀態</th><th>付款</th><th style="text-align:right;">金額</th><th style="text-align:center;">操作</th></tr></thead><tbody>${rowsHtml}</tbody></table>` : '<div style="color:#9db4bf;padding:10px 0;">沒有訂單紀錄</div>'}
         </div>`;
     }
 
@@ -809,6 +981,10 @@
 
     // ---------- 主渲染 ----------
     function renderAdmin() {
+      // 記住捲動位置：整頁垂直 + 分頁橫桿(.admin-tabs)的橫向捲動，重建 DOM 後還原，避免點擊後跳回最前面
+      const _scrollY = window.scrollY;
+      const _tabsBar = app.querySelector('.admin-tabs');
+      const _tabsLeft = _tabsBar ? _tabsBar.scrollLeft : 0;
       const bodyFns = { revenue: tabRevenue, ops: tabOps, cost: tabCost, payroll: tabPayroll, ing: tabIng, equip: tabEquip, menu: tabMenu, history: tabHistory };
       app.innerHTML = `
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
@@ -820,6 +996,9 @@
         ${renderModals()}
       `;
       bindAdmin();
+      const _newTabsBar = app.querySelector('.admin-tabs');
+      if (_newTabsBar) _newTabsBar.scrollLeft = _tabsLeft;
+      window.scrollTo(0, _scrollY);
     }
 
     function bindAdmin() {
@@ -834,9 +1013,17 @@
       const cat = b.dataset.cat, id = b.dataset.id, kind = b.dataset.kind;
       if (a === 'hist-today') { histScope = 'today'; renderAdmin(); }
       else if (a === 'hist-all') { histScope = 'all'; renderAdmin(); }
+      else if (a === 'hist-del') { if (confirm('確定刪除這筆訂單？此動作無法復原，且會從雲端同步移除。')) syncDeleteOrder(id); }
+      else if (a === 'rpt-day') { reportPeriod = 'day'; renderAdmin(); }
+      else if (a === 'rpt-week') { reportPeriod = 'week'; renderAdmin(); }
+      else if (a === 'rpt-month') { reportPeriod = 'month'; renderAdmin(); }
       else if (a === 'hist-print') { const el = document.getElementById('hist-date'); printDayReport(el ? el.value : ''); }
       else if (a === 'hist-sync') { const el = document.getElementById('hist-date'); syncDayToSheet(el ? el.value : ''); }
       else if (a === 'hist-save-sheet') { const el = document.getElementById('sheet-url'); cfg = Object.assign({}, cfg, { sheetUrl: el ? el.value.trim() : '' }); saveConfig(cfg); showMessage('已儲存 Google Sheet 連結'); }
+      else if (a === 'save-close-time') { const el = document.getElementById('close-time'); const en = document.getElementById('close-enabled'); cfg = Object.assign({}, cfg, { closeTime: (el && el.value) || '11:50', closeEnabled: !!(en && en.checked) }); saveConfig(cfg); showMessage(cfg.closeEnabled ? ('已啟用結單時間：' + cfg.closeTime) : '已暫停結單（測試模式）'); }
+      else if (a === 'cat-add') { addCategory(); }
+      else if (a === 'cat-rename') { renameCategory(cat); }
+      else if (a === 'cat-del') { deleteCategory(cat); }
       else if (a === 'item-active') { toggleItem(cat, id, 'active'); }
       else if (a === 'item-sold') { toggleItem(cat, id, 'soldOut'); }
       else if (a === 'item-del') { if (confirm('確定刪除此品項？')) deleteItem(cat, id); }
@@ -855,6 +1042,27 @@
     }
 
     // ---------- 菜單操作 ----------
+    function addCategory() {
+      const name = (prompt('新增大類名稱（例：三明治系列）') || '').trim();
+      if (!name) return;
+      const icon = (prompt('分類圖示 emoji（可留空，預設 🍽️）', '🥪') || '🍽️').trim() || '🍽️';
+      const nid = 'cat' + Date.now();
+      cfg.menu = [...cfg.menu, { id: nid, name, icon, items: [] }];
+      saveMenu(cfg.menu); renderAdmin();
+    }
+    function renameCategory(catId) {
+      const c = cfg.menu.find(x => x.id === catId); if (!c) return;
+      const name = prompt('修改大類名稱', c.name); if (name === null) return;
+      const icon = prompt('修改圖示 emoji', c.icon || '🍽️'); if (icon === null) return;
+      cfg.menu = cfg.menu.map(x => x.id !== catId ? x : Object.assign({}, x, { name: (name || '').trim() || x.name, icon: (icon || '').trim() || x.icon }));
+      saveMenu(cfg.menu); renderAdmin();
+    }
+    function deleteCategory(catId) {
+      const c = cfg.menu.find(x => x.id === catId); if (!c) return;
+      if (!confirm(`確定刪除大類「${c.name}」？\n其下 ${c.items.length} 個品項會一併刪除。`)) return;
+      cfg.menu = cfg.menu.filter(x => x.id !== catId);
+      saveMenu(cfg.menu); renderAdmin();
+    }
     function findItem(catId, id) { const c = cfg.menu.find(x => x.id === catId); return c ? c.items.find(i => i.id === id) : null; }
     function toggleItem(catId, id, field) {
       cfg.menu = cfg.menu.map(c => c.id !== catId ? c : Object.assign({}, c, { items: c.items.map(i => i.id !== id ? i : Object.assign({}, i, { [field]: !i[field] })) }));
