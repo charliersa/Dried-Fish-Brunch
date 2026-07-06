@@ -145,7 +145,7 @@
             ${order.phone ? `<span>·</span><span>📞 ${escapeHtml(order.phone)}</span>` : ''}
           </div>
           <div class="order-items">
-            ${order.items.map(item => { const mi = getItem(item.id); const nm = item.name || (mi && mi.name) || '未知品項'; return `
+            ${order.items.map(item => { const mi = getItem(item.id); const nm = (mi && mi.name) || item.name || '未知品項'; return `
               <div class="item-row"><span>${nm}${item.temp ? `（${item.temp}）` : ''}${item.note ? ` <span style="color:var(--amber);font-weight:700;">📝${escapeHtml(item.note)}</span>` : ''}</span><span>×${item.qty}</span></div>
             `; }).join('')}
             ${order.note ? `<div class="order-note">📝 ${escapeHtml(order.note)}</div>` : ''}
@@ -154,6 +154,7 @@
             <span style="font-weight:800;color:var(--pink);">$${order.total}</span>
             <div style="display:flex;align-items:center;gap:6px;">
               ${order.status !== 'done' ? `<button class="pill-button" style="border-color:#e5534b;color:#e5534b;" data-action="reject" data-id="${order.id}">🚫 拒單</button>` : ''}
+              ${order.status !== 'done' ? `<button class="pill-button" style="border-color:#e5534b;color:#e5534b;padding:8px 12px;font-weight:800;" data-action="reject-quick" data-id="${order.id}" title="快速拒單（不問原因）">✕</button>` : ''}
               ${actionButton}
             </div>
           </div>
@@ -207,6 +208,14 @@
           order.rejected = true; order.rejectReason = reason; // 樂觀更新
           renderKitchen();
           syncUpdateOrder(id, { rejected: true, rejectReason: reason, updatedAt: Date.now() });
+        }
+      } else if (action === 'reject-quick') {
+        const id = btn.dataset.id;
+        const order = orders.find(o => o.id === id);
+        if (order) {
+          order.rejected = true; order.rejectReason = ''; // 樂觀更新：快速拒單、不問原因、不跳確認框
+          renderKitchen();
+          syncUpdateOrder(id, { rejected: true, rejectReason: '', updatedAt: Date.now() });
         }
       } else if (action === 'refresh') {
         renderKitchen();
