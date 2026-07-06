@@ -850,7 +850,10 @@
       const addCatBar = `
         <div class="admin-card" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
           <h3 style="margin:0;">📋 菜單大類</h3>
-          <button class="add-btn" data-action="cat-add">＋ 新增大類</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="mini-btn" data-action="menu-reset-default" style="border:1.5px solid #e5534b;color:#e5534b;background:#fff;" title="把雲端菜單覆蓋成程式內建的預設菜單（含最新完整品名）">🔄 重設成預設菜單</button>
+            <button class="add-btn" data-action="cat-add">＋ 新增大類</button>
+          </div>
         </div>`;
       return settingsBar + addCatBar + cfg.menu.map(cat => {
         const items = cat.items.map(it => {
@@ -1021,6 +1024,7 @@
       else if (a === 'hist-sync') { const el = document.getElementById('hist-date'); syncDayToSheet(el ? el.value : ''); }
       else if (a === 'hist-save-sheet') { const el = document.getElementById('sheet-url'); cfg = Object.assign({}, cfg, { sheetUrl: el ? el.value.trim() : '' }); saveConfig(cfg); showMessage('已儲存 Google Sheet 連結'); }
       else if (a === 'save-close-time') { const el = document.getElementById('close-time'); const en = document.getElementById('close-enabled'); cfg = Object.assign({}, cfg, { closeTime: (el && el.value) || '11:50', closeEnabled: !!(en && en.checked) }); saveConfig(cfg); showMessage(cfg.closeEnabled ? ('已啟用結單時間：' + cfg.closeTime) : '已暫停結單（測試模式）'); }
+      else if (a === 'menu-reset-default') { resetMenuToDefault(); }
       else if (a === 'cat-add') { addCategory(); }
       else if (a === 'cat-rename') { renameCategory(cat); }
       else if (a === 'cat-del') { deleteCategory(cat); }
@@ -1042,6 +1046,16 @@
     }
 
     // ---------- 菜單操作 ----------
+    function resetMenuToDefault() {
+      if (!confirm('確定要「重設成程式預設菜單」嗎？\n\n會用程式內建的預設菜單（含最新完整品名）覆蓋掉目前雲端的菜單設定。\n你手動新增／改名／改價／下架售完的設定都會被清掉，全部品項恢復上架、不售完。\n此動作無法復原。')) return;
+      // 從內建常數 MENU 重建（不是用 CURRENT_MENU，因為它可能已被雲端舊設定覆蓋）
+      const fresh = MENU.map(cat => Object.assign({}, JSON.parse(JSON.stringify(cat)), {
+        items: cat.items.map(it => Object.assign({ active: true, soldOut: false }, JSON.parse(JSON.stringify(it)))),
+      }));
+      cfg.menu = fresh;
+      saveMenu(cfg.menu); renderAdmin();
+      showMessage('已重設成程式預設菜單');
+    }
     function addCategory() {
       const name = (prompt('新增大類名稱（例：三明治系列）') || '').trim();
       if (!name) return;
