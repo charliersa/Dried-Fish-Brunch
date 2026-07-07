@@ -94,6 +94,7 @@
         `<div class="order-grid">${active.map(order => renderKitchenCard(order)).join('')}</div>`;
 
       app.innerHTML = `
+        ${audioReady ? '' : '<button data-action="enable-sound" style="width:100%;margin-bottom:10px;padding:14px;border:none;border-radius:12px;background:#e89a2b;color:#fff;font-weight:800;font-size:15px;cursor:pointer;box-shadow:0 4px 12px rgba(232,154,43,.35);">🔔 點我開啟新訂單提示音（每次開店點一次）</button>'}
         <div class="stats-grid">
           ${renderStat('今日訂單', stats.total)}
           ${renderStat('待製作', stats.new, 'var(--amber)')}
@@ -227,6 +228,9 @@
           renderKitchen();
           syncUpdateOrder(id, { rejected: true, rejectReason: '', updatedAt: Date.now() });
         }
+      } else if (action === 'enable-sound') {
+        _unlockAudio();
+        playNewOrderSound(); // 試響一聲，確認可以出聲
       } else if (action === 'toggle-sound') {
         toggleSound();
       } else if (action === 'refresh') {
@@ -247,9 +251,11 @@
       _audioCtx = new AC();
       return _audioCtx;
     }
+    let audioReady = false; // 音訊是否已解鎖（瀏覽器需先有互動才能發聲）
     function _unlockAudio() {
       const ctx = _getAudioCtx();
       if (ctx && ctx.state === 'suspended') ctx.resume();
+      if (!audioReady) { audioReady = true; renderKitchen(); } // 首次互動後隱藏提示橫幅
     }
     document.addEventListener('touchend', _unlockAudio, { passive: true });
     document.addEventListener('click', _unlockAudio, { passive: true });
