@@ -188,6 +188,7 @@
           order.status = status; // 樂觀更新
           renderKitchen();
           syncUpdateOrder(id, { status, updatedAt: Date.now() });
+          if (status === 'done') notifyOrderReady(order); // 餐點完成 → 推播通知顧客手機
         }
       } else if (action === 'set-device') {
         const c = prompt('設定本機代碼（會顯示在取餐號前，建議每台不同，例：A、B）', getDeviceCode());
@@ -305,6 +306,14 @@
       const hasNew = list.some(o => !_knownIds.has(o.id) && o.status === 'new' && !o.rejected);
       _knownIds = ids;
       if (hasNew && soundEnabled) playNewOrderSound();
+    }
+    // 餐點完成 → 呼叫 push-server 推播到顧客手機（顧客有授權通知才會有 fcmToken）
+    function notifyOrderReady(order) {
+      try {
+        if (!order || !order.fcmToken) return;
+        if (typeof PUSH_CONFIG === 'undefined' || !PUSH_CONFIG.notifyEndpoint || PUSH_CONFIG.notifyEndpoint.indexOf('PASTE') !== -1) return;
+        fetch(PUSH_CONFIG.notifyEndpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: order.fcmToken, no: order.no }) }).catch(() => {});
+      } catch (e) {}
     }
 
     renderKitchen();

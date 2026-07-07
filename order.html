@@ -290,6 +290,7 @@
 
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
   <script src="firebase-config.js"></script>
   <script src="shared.js"></script>
   <script>document.head.insertAdjacentHTML('beforeend', '<style>' + getSharedStyles() + '</style>');</script>
@@ -806,6 +807,20 @@
       }
       _prevMyStatus = o.status;
     }
+    // 顧客授權通知 → 取得 FCM token 存進訂單，餐點完成時才推播得到（關網頁也收得到）
+    async function ensureOrderPush(order) {
+      try {
+        if (!('Notification' in window) || !('serviceWorker' in navigator)) return;
+        if (typeof firebase === 'undefined' || typeof firebase.messaging !== 'function') return;
+        if (typeof PUSH_CONFIG === 'undefined' || !PUSH_CONFIG.vapidKey || PUSH_CONFIG.vapidKey.indexOf('PASTE') !== -1) return;
+        let perm = Notification.permission;
+        if (perm === 'default') perm = await Notification.requestPermission();
+        if (perm !== 'granted') return;
+        const reg = await navigator.serviceWorker.register('firebase-messaging-sw.js', { scope: './fcm-scope/' });
+        const token = await firebase.messaging().getToken({ vapidKey: PUSH_CONFIG.vapidKey, serviceWorkerRegistration: reg });
+        if (token) syncUpdateOrder(order.id, { fcmToken: token });
+      } catch (e) { console.warn('推播設定略過', e); }
+    }
 
     function submitOrder() {
       if (state.submitting) return; // 防連點：避免一次送出產生重複訂單
@@ -820,6 +835,8 @@
         if (!/^09\d{8}$/.test(phone)) { showMessage('外帶請填正確手機號碼（09 開頭共 10 碼）'); return; }
       }
       state.submitting = true;
+      // 在「送出」手勢中先要求通知權限（餐點完成才推播得到）
+      try { if ('Notification' in window && Notification.permission === 'default' && typeof PUSH_CONFIG !== 'undefined' && PUSH_CONFIG.vapidKey && PUSH_CONFIG.vapidKey.indexOf('PASTE') === -1) Notification.requestPermission(); } catch (e) {}
       const order = {
         id: getDeviceId() + '-' + Date.now(), // 裝置碼+時間戳：全域唯一，離線重傳也不會在雲端重複
         deviceId: getDeviceId(),
@@ -840,6 +857,7 @@
       };
       orders = orders.concat([order]); // 樂觀更新，雲端快照回來後會自動校正
       syncAddOrder(order);
+      ensureOrderPush(order); // 取得推播 token 存進訂單（完成時才推播得到）
       state.currentOrderId = order.id;
       state.cart = [];
       state.cartOpen = false;
