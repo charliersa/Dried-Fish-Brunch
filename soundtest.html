@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>聲音測試</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 24px; background: #f4fafd; color: #143241; }
+    h1 { font-size: 20px; }
+    button { width: 100%; padding: 20px; font-size: 18px; font-weight: 800; border: none; border-radius: 14px; color: #fff; cursor: pointer; margin-bottom: 14px; }
+    #beep { background: #e89a2b; }
+    #chime { background: #d84b84; }
+    #log { background: #fff; border-radius: 12px; padding: 14px; font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-all; }
+    .hint { font-size: 14px; color: #5a7784; margin-bottom: 18px; }
+  </style>
+</head>
+<body>
+  <h1>🔊 聲音測試頁</h1>
+  <div class="hint">先確認手機/電腦<b>音量開大、沒靜音</b>，然後按下面按鈕。聽得到聲音代表裝置沒問題。</div>
+  <button id="beep">① 播放「嗶」一聲（最基本）</button>
+  <button id="chime">② 播放後台的「叮咚叮」新訂單音</button>
+  <div id="log">狀態會顯示在這裡…</div>
+
+  <script>
+    const logEl = document.getElementById('log');
+    let lines = [];
+    function log(m) { lines.unshift(m); logEl.textContent = lines.join('\n'); }
+    let ctx = null;
+    function getCtx() {
+      if (!ctx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) { log('❌ 此瀏覽器不支援 Web Audio'); return null; }
+        ctx = new AC();
+        log('🔧 已建立 AudioContext，取樣率 ' + ctx.sampleRate);
+      }
+      return ctx;
+    }
+
+    document.getElementById('beep').addEventListener('click', () => {
+      const c = getCtx(); if (!c) return;
+      c.resume().then(() => log('▶ resume 後狀態：' + c.state));
+      const osc = c.createOscillator();
+      const g = c.createGain();
+      osc.type = 'sine'; osc.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, c.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.6, c.currentTime + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + 0.5);
+      osc.connect(g).connect(c.destination);
+      osc.start(); osc.stop(c.currentTime + 0.55);
+      log('🔔 已送出「嗶」，狀態=' + c.state + '（若沒聲音→裝置音量/靜音問題）');
+      if (navigator.vibrate) navigator.vibrate(120);
+    });
+
+    document.getElementById('chime').addEventListener('click', () => {
+      const c = getCtx(); if (!c) return;
+      c.resume();
+      const now = c.currentTime;
+      const master = c.createDynamicsCompressor();
+      master.threshold.value = -8; master.knee.value = 6; master.ratio.value = 14;
+      master.attack.value = 0.002; master.release.value = 0.25;
+      const outGain = c.createGain(); outGain.gain.value = 1.0;
+      master.connect(outGain).connect(c.destination);
+      const seq = [1174.66, 880, 1174.66];
+      for (let rep = 0; rep < 2; rep++) {
+        const base = now + rep * 0.95;
+        seq.forEach((freq, i) => {
+          const t0 = base + i * 0.17, dur = 0.55;
+          [['triangle', 1, 0.95], ['sine', 2, 0.5]].forEach(([type, mult, peak]) => {
+            const osc = c.createOscillator(), g = c.createGain();
+            osc.type = type; osc.frequency.value = freq * mult;
+            g.gain.setValueAtTime(0.0001, t0);
+            g.gain.exponentialRampToValueAtTime(peak, t0 + 0.012);
+            g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+            osc.connect(g).connect(master);
+            osc.start(t0); osc.stop(t0 + dur + 0.05);
+          });
+        });
+      }
+      log('🔔 已送出「叮咚叮」，狀態=' + c.state);
+      if (navigator.vibrate) navigator.vibrate([120, 60, 120, 60, 200]);
+    });
+  </script>
+</body>
+</html>
