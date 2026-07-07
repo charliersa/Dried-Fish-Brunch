@@ -17,10 +17,12 @@
 <body>
   <h1>🔊 聲音測試頁</h1>
   <div class="hint">先確認手機/電腦<b>音量開大、沒靜音</b>，然後按下面按鈕。聽得到聲音代表裝置沒問題。</div>
-  <button id="beep">① 播放「嗶」一聲（最基本）</button>
-  <button id="chime">② 播放後台的「叮咚叮」新訂單音</button>
+  <button id="beep">① 播放「嗶」一聲（Web Audio 合成）</button>
+  <button id="chime">② 播放「叮咚叮」（Web Audio 合成）</button>
+  <button id="file" style="background:#3fb27f;">③ 播放音檔（真檔案，後台新版用這個）</button>
   <div id="log">狀態會顯示在這裡…</div>
 
+  <script src="neworder-sound.js"></script>
   <script>
     const logEl = document.getElementById('log');
     let lines = [];
@@ -69,6 +71,20 @@
         });
       }
       log('🔔 已送出「叮咚叮」（新版方波），狀態=' + c.state);
+      if (navigator.vibrate) navigator.vibrate([120, 60, 120, 60, 200]);
+    });
+
+    // ③ 真・音檔（後台新版用的方式）
+    let _fileAudio = null;
+    document.getElementById('file').addEventListener('click', () => {
+      if (!window.ALERT_SOUND_URI) { log('❌ 音檔沒載入到（ALERT_SOUND_URI 空）'); return; }
+      try {
+        if (!_fileAudio) _fileAudio = new Audio(window.ALERT_SOUND_URI);
+        _fileAudio.currentTime = 0; _fileAudio.volume = 1;
+        const p = _fileAudio.play();
+        if (p && p.then) p.then(() => log('🔊 音檔播放中…（若這個有聲音，後台就會有聲音）')).catch(err => log('❌ 音檔播放失敗：' + err.message));
+        else log('🔊 音檔已觸發播放');
+      } catch (e) { log('❌ 音檔錯誤：' + e.message); }
       if (navigator.vibrate) navigator.vibrate([120, 60, 120, 60, 200]);
     });
   </script>
