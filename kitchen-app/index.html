@@ -86,7 +86,6 @@
         `<div class="order-grid">${active.map(order => renderKitchenCard(order)).join('')}</div>`;
 
       app.innerHTML = `
-        ${audioReady ? '' : '<button data-action="enable-sound" style="width:100%;margin-bottom:10px;padding:14px;border:none;border-radius:12px;background:#e89a2b;color:#fff;font-weight:800;font-size:15px;cursor:pointer;box-shadow:0 4px 12px rgba(232,154,43,.35);">🔔 點我開啟新訂單提示音（每次開店點一次）</button>'}
         <div class="stats-grid">
           ${renderStat('今日訂單', stats.total)}
           ${renderStat('待製作', stats.new, 'var(--amber)')}
