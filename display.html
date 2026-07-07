@@ -129,8 +129,8 @@
 
     function renderDisplay() {
       const today = orders.filter(o => isToday(o.createdAt) && !o.rejected);
-      const ready = today.filter(o => o.status === 'done' && !((o.pay && o.pay.paid) && o.picked)).sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt)); // 紅：可取餐（結帳+取餐都完成才消失）
-      const preparing = today.filter(o => o.status !== 'done').sort((a, b) => a.createdAt - b.createdAt); // 藍：準備中
+      const ready = today.filter(o => o.notified && !((o.pay && o.pay.paid) && o.picked)).sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt)); // 紅：可取餐（廚房按通知取餐後亮；結帳+取餐都完成才消失）
+      const preparing = today.filter(o => !o.notified && !o.picked).sort((a, b) => a.createdAt - b.createdAt); // 藍：準備中（尚未通知取餐）
 
       // 有新號碼進入「可取餐」時嗶一聲
       const topId = ready.length ? ready[0].id : null;

@@ -322,7 +322,7 @@
     // 公共叫號板：顯示今天「可取餐（已完成）」的號碼，highlightNo 為顧客自己的號碼
     function renderCallBoard(highlightNo) {
       const today = orders.filter(o => isToday(o.createdAt));
-      const ready = today.filter(o => o.status === 'done').sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+      const ready = today.filter(o => o.notified).sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
       const making = today.filter(o => o.status !== 'done').length;
       const chips = ready.length
         ? ready.map(o => `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:60px;padding:10px 14px;border-radius:14px;font-size:22px;font-weight:900;${o.no === highlightNo ? 'background:var(--pink);color:#fff;box-shadow:0 4px 12px rgba(216,75,132,.4);' : 'background:#fff;color:var(--pink-deep);border:2px solid var(--pink);'}">${escapeHtml(o.no)}</span>`).join('')
@@ -574,7 +574,7 @@
         </div>
       `; }).join('');
 
-      const isReady = order.status === 'done'; // 可取餐狀態
+      const isReady = !!order.notified; // 可取餐狀態（廚房按「通知取餐」才亮）
       app.innerHTML = `
         <div>
           <div style="background:${isReady ? 'linear-gradient(135deg,#3fb27f,#2c8f62)' : '#fff'};border-radius:22px;padding:24px;box-shadow:0 4px 14px rgba(28,94,122,.1);text-align:center;${isReady ? 'color:#fff;' : ''}">
@@ -798,15 +798,15 @@
       } catch (e) {}
     }
     // 偵測「自己的訂單」是否剛被廚房按完成 → 響鈴（首次載入或已完成的舊單不會響）
-    let _prevMyStatus = null;
+    let _prevNotified = null;
     function checkMyOrderReady(list) {
-      if (!state.currentOrderId) { _prevMyStatus = null; return; }
+      if (!state.currentOrderId) { _prevNotified = null; return; }
       const o = list.find(x => x.id === state.currentOrderId);
-      if (!o) { _prevMyStatus = null; return; }
-      if (_prevMyStatus && _prevMyStatus !== 'done' && o.status === 'done' && !o.rejected) {
-        playReadySound();
+      if (!o) { _prevNotified = null; return; }
+      if (_prevNotified === false && o.notified === true && !o.rejected) {
+        playReadySound(); // 廚房按「通知取餐」→ 響
       }
-      _prevMyStatus = o.status;
+      _prevNotified = !!o.notified;
     }
     // 顧客授權通知 → 取得 FCM token 存進訂單，餐點完成時才推播得到（關網頁也收得到）
     async function ensureOrderPush(order) {

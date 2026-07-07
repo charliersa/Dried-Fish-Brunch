@@ -75,6 +75,7 @@
               const pickBadge = o.picked
                 ? `<span style="font-weight:800;color:var(--green);font-size:13px;">✅ 已取餐</span>`
                 : `<button class="pill-button" style="border-color:#e5534b;color:#e5534b;" data-action="pickup" data-id="${o.id}">✔️ 取餐</button>`;
+              const notifyBtn = `<button class="pill-button" style="border-color:#d84b84;color:#d84b84;font-weight:800;" data-action="notify-pickup" data-id="${o.id}">📣 ${o.notified ? '再通知取餐' : '通知取餐'}</button>${o.notified ? '<span style="font-size:12px;color:var(--green);font-weight:700;margin-left:4px;">✅ 已通知顧客</span>' : ''}`;
               return `
                 <div style="border:2px solid #e5534b;border-radius:14px;padding:10px 12px;">
                   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
@@ -84,6 +85,10 @@
                   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                     <span style="font-size:13px;color:var(--ink-soft);">結帳：</span>${payBadge}
                     <span style="font-size:13px;color:var(--ink-soft);margin-left:6px;">取餐：</span>${pickBadge}
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                    ${notifyBtn}
+                    <button class="pill-button" style="border-color:#9db4bf;color:#9db4bf;margin-left:auto;" data-action="cancel-order" data-id="${o.id}">✖ 取消</button>
                   </div>
                 </div>`;
             }).join('')}
@@ -190,7 +195,6 @@
           order.status = status; // 樂觀更新
           renderKitchen();
           syncUpdateOrder(id, { status, updatedAt: Date.now() });
-          if (status === 'done') notifyOrderReady(order); // 餐點完成 → 推播通知顧客手機
         }
       } else if (action === 'set-device') {
         const c = prompt('設定本機代碼（會顯示在取餐號前，建議每台不同，例：A、B）', getDeviceCode());
@@ -202,6 +206,23 @@
           order.picked = true; // 樂觀更新：標記已取餐
           renderKitchen();
           syncUpdateOrder(id, { picked: true, updatedAt: Date.now() });
+        }
+      } else if (action === 'notify-pickup') {
+        const id = btn.dataset.id;
+        const order = orders.find(o => o.id === id);
+        if (order) {
+          order.notified = true; // 通知顧客可取餐（顧客手機顯示可取餐＋響＋推播）
+          renderKitchen();
+          syncUpdateOrder(id, { notified: true, updatedAt: Date.now() });
+          notifyOrderReady(order); // 關網頁也收得到的推播
+        }
+      } else if (action === 'cancel-order') {
+        const id = btn.dataset.id;
+        const order = orders.find(o => o.id === id);
+        if (order && confirm('確定要取消這張訂單嗎？\n取消後會從廚房、收銀、叫號畫面移除。')) {
+          order.rejected = true; order.rejectReason = '已取消';
+          renderKitchen();
+          syncUpdateOrder(id, { rejected: true, rejectReason: '已取消', updatedAt: Date.now() });
         }
       } else if (action === 'pay-cash' || action === 'pay-mobile') {
         const id = btn.dataset.id;
