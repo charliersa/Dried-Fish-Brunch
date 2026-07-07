@@ -32,6 +32,7 @@
 
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
   <script src="firebase-config.js"></script>
   <script src="neworder-sound.js"></script>
   <script src="shared.js"></script>
@@ -246,6 +247,7 @@
     // 提示音音檔（HTMLAudio，相容性最高）；使用者互動一次即解鎖，之後可自動播放
     const _alertAudio = new Audio(window.ALERT_SOUND_URI || '');
     _alertAudio.preload = 'auto';
+    let _bpDone = false;
     function _unlockAudio() {
       const ctx = _getAudioCtx();
       if (ctx && ctx.state === 'suspended') ctx.resume();
@@ -254,9 +256,27 @@
         const p = _alertAudio.play();
         if (p && p.then) p.then(() => { _alertAudio.pause(); _alertAudio.currentTime = 0; _alertAudio.volume = 1; }).catch(() => { _alertAudio.volume = 1; });
       } catch (e) { _alertAudio.volume = 1; }
+      if (!_bpDone) { _bpDone = true; registerBackendPush(); } // 首次互動時註冊後端推播（關網頁也收得到新單）
     }
     document.addEventListener('touchend', _unlockAudio, { passive: true });
     document.addEventListener('click', _unlockAudio, { passive: true });
+    // 註冊本裝置為「後端推播接收者」：授權通知→取得 token→存進 backendTokens
+    async function registerBackendPush() {
+      try {
+        if (!('Notification' in window) || !('serviceWorker' in navigator)) return;
+        if (typeof firebase === 'undefined' || typeof firebase.messaging !== 'function') return;
+        if (typeof PUSH_CONFIG === 'undefined' || !PUSH_CONFIG.vapidKey || PUSH_CONFIG.vapidKey.indexOf('PASTE') !== -1) return;
+        let perm = Notification.permission;
+        if (perm === 'default') perm = await Notification.requestPermission();
+        if (perm !== 'granted') return;
+        const reg = await navigator.serviceWorker.register('firebase-messaging-sw.js', { scope: './fcm-scope/' });
+        const token = await firebase.messaging().getToken({ vapidKey: PUSH_CONFIG.vapidKey, serviceWorkerRegistration: reg });
+        if (!token) return;
+        let bid;
+        try { bid = localStorage.getItem('xyg-backend-id'); if (!bid) { bid = 'bk' + Date.now() + Math.floor(Math.random() * 1000); localStorage.setItem('xyg-backend-id', bid); } } catch (e) { bid = token.slice(-24); }
+        firebase.firestore().collection('backendTokens').doc(bid).set({ token, updatedAt: Date.now() });
+      } catch (e) { console.warn('後端推播註冊略過', e); }
+    }
     // 提示音開關（預設開，記在 localStorage）
     let soundEnabled = true;
     try { soundEnabled = localStorage.getItem('xyg-kitchen-sound') !== 'off'; } catch (e) {}
