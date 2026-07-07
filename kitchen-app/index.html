@@ -267,30 +267,20 @@
         if (!ctx) return;
         if (ctx.state === 'suspended') ctx.resume();
         const now = ctx.currentTime;
-        const master = ctx.createDynamicsCompressor();
-        master.threshold.value = -8; master.knee.value = 6; master.ratio.value = 14;
-        master.attack.value = 0.002; master.release.value = 0.25;
-        const outGain = ctx.createGain();
-        outGain.gain.value = 1.0;
-        master.connect(outGain).connect(ctx.destination);
-        const seq = [1174.66, 880, 1174.66]; // 引起注意的「叮咚叮」
+        const seq = [880, 1174.66, 1568]; // 上行三音「叮咚叮」（簡化、高相容性，不用壓縮器）
         for (let rep = 0; rep < 2; rep++) {
-          const base = now + rep * 0.95;
           seq.forEach((freq, i) => {
-            const t0 = base + i * 0.17;
-            const dur = 0.55;
-            [['triangle', 1, 0.95], ['sine', 2, 0.5]].forEach(([type, mult, peak]) => {
-              const osc = ctx.createOscillator();
-              const gain = ctx.createGain();
-              osc.type = type;
-              osc.frequency.value = freq * mult;
-              gain.gain.setValueAtTime(0.0001, t0);
-              gain.gain.exponentialRampToValueAtTime(peak, t0 + 0.012);
-              gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-              osc.connect(gain).connect(master);
-              osc.start(t0);
-              osc.stop(t0 + dur + 0.05);
-            });
+            const t0 = now + rep * 0.85 + i * 0.16;
+            const osc = ctx.createOscillator();
+            const g = ctx.createGain();
+            osc.type = 'square'; // 方波：響亮、幾乎所有瀏覽器都支援
+            osc.frequency.value = freq;
+            g.gain.setValueAtTime(0.0001, t0);
+            g.gain.exponentialRampToValueAtTime(0.4, t0 + 0.02);
+            g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.42);
+            osc.connect(g).connect(ctx.destination);
+            osc.start(t0);
+            osc.stop(t0 + 0.46);
           });
         }
         if (navigator.vibrate) navigator.vibrate([120, 60, 120, 60, 200]);

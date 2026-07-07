@@ -55,28 +55,20 @@
       const c = getCtx(); if (!c) return;
       c.resume();
       const now = c.currentTime;
-      const master = c.createDynamicsCompressor();
-      master.threshold.value = -8; master.knee.value = 6; master.ratio.value = 14;
-      master.attack.value = 0.002; master.release.value = 0.25;
-      const outGain = c.createGain(); outGain.gain.value = 1.0;
-      master.connect(outGain).connect(c.destination);
-      const seq = [1174.66, 880, 1174.66];
+      const seq = [880, 1174.66, 1568]; // 與後台相同的簡化版（方波、無壓縮器）
       for (let rep = 0; rep < 2; rep++) {
-        const base = now + rep * 0.95;
         seq.forEach((freq, i) => {
-          const t0 = base + i * 0.17, dur = 0.55;
-          [['triangle', 1, 0.95], ['sine', 2, 0.5]].forEach(([type, mult, peak]) => {
-            const osc = c.createOscillator(), g = c.createGain();
-            osc.type = type; osc.frequency.value = freq * mult;
-            g.gain.setValueAtTime(0.0001, t0);
-            g.gain.exponentialRampToValueAtTime(peak, t0 + 0.012);
-            g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-            osc.connect(g).connect(master);
-            osc.start(t0); osc.stop(t0 + dur + 0.05);
-          });
+          const t0 = now + rep * 0.85 + i * 0.16;
+          const osc = c.createOscillator(), g = c.createGain();
+          osc.type = 'square'; osc.frequency.value = freq;
+          g.gain.setValueAtTime(0.0001, t0);
+          g.gain.exponentialRampToValueAtTime(0.4, t0 + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.42);
+          osc.connect(g).connect(c.destination);
+          osc.start(t0); osc.stop(t0 + 0.46);
         });
       }
-      log('🔔 已送出「叮咚叮」，狀態=' + c.state);
+      log('🔔 已送出「叮咚叮」（新版方波），狀態=' + c.state);
       if (navigator.vibrate) navigator.vibrate([120, 60, 120, 60, 200]);
     });
   </script>
