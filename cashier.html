@@ -90,6 +90,7 @@
             💰 營收統計
             <button class="pill-button" data-action="set-device" style="cursor:pointer;font-size:12px;padding:4px 10px;">📟 本機代碼：${getDeviceCode()}</button>
             <button class="pill-button" data-action="toggle-sound" style="cursor:pointer;font-size:12px;padding:4px 10px;">${soundEnabled ? '🔔 提示音：開' : '🔕 提示音：關'}</button>
+            <button class="pill-button" data-action="enable-push" style="cursor:pointer;font-size:12px;padding:4px 10px;${_pushState === 'granted' ? 'border-color:#3fa877;color:#3fa877;' : 'border-color:#e89a2b;color:#e89a2b;'}">${_pushState === 'granted' ? '✅ 關店通知：開' : '🔔 開啟關店通知'}</button>
           </div>
           <div>總營收: <span style="font-weight:900;color:var(--green);">$${totalRevenue}</span></div>
         </div>
@@ -183,6 +184,10 @@
         toggleSound();
         return;
       }
+      if (action === 'enable-push') {
+        registerBackendPush(true);
+        return;
+      }
       if (action === 'pay-cash' || action === 'pay-mobile') {
         const id = btn.dataset.id;
         const method = action === 'pay-cash' ? 'cash' : 'mobile';
@@ -208,6 +213,7 @@
     const _alertAudio = new Audio(window.ALERT_SOUND_URI || '');
     _alertAudio.preload = 'auto';
     let _bpDone = false;
+    let _pushState = (typeof Notification !== 'undefined') ? Notification.permission : 'unsupported'; // granted/denied/default/unsupported
     function _unlockAudio() {
       const ctx = _getAudioCtx();
       if (ctx && ctx.state === 'suspended') ctx.resume();
@@ -221,21 +227,26 @@
     document.addEventListener('touchend', _unlockAudio, { passive: true });
     document.addEventListener('click', _unlockAudio, { passive: true });
     // 註冊本裝置為「後端推播接收者」：授權通知→取得 token→存進 backendTokens
-    async function registerBackendPush() {
+    // interactive=true（手動點按鈕）或首次授權成功時，會跳確認視窗
+    async function registerBackendPush(interactive) {
       try {
-        if (!('Notification' in window) || !('serviceWorker' in navigator)) return;
+        if (!('Notification' in window) || !('serviceWorker' in navigator)) { if (interactive) alert('此裝置或瀏覽器不支援通知'); return; }
         if (typeof firebase === 'undefined' || typeof firebase.messaging !== 'function') return;
         if (typeof PUSH_CONFIG === 'undefined' || !PUSH_CONFIG.vapidKey || PUSH_CONFIG.vapidKey.indexOf('PASTE') !== -1) return;
-        let perm = Notification.permission;
+        const before = Notification.permission;
+        let perm = before;
         if (perm === 'default') perm = await Notification.requestPermission();
-        if (perm !== 'granted') return;
+        _pushState = perm; renderCashier();
+        if (perm !== 'granted') { if (interactive) alert('⚠️ 尚未允許通知，關店時不會收到推播。\n可到 iPad「設定 → 通知」開啟本 App 的通知。'); return; }
         const reg = await navigator.serviceWorker.register('firebase-messaging-sw.js', { scope: './fcm-scope/' });
         const token = await firebase.messaging().getToken({ vapidKey: PUSH_CONFIG.vapidKey, serviceWorkerRegistration: reg });
-        if (!token) return;
+        if (!token) { if (interactive) alert('取得推播失敗，請重試'); return; }
         let bid;
         try { bid = localStorage.getItem('xyg-backend-id'); if (!bid) { bid = 'bk' + Date.now() + Math.floor(Math.random() * 1000); localStorage.setItem('xyg-backend-id', bid); } } catch (e) { bid = token.slice(-24); }
-        firebase.firestore().collection('backendTokens').doc(bid).set({ token, updatedAt: Date.now() });
-      } catch (e) { console.warn('後端推播註冊略過', e); }
+        await firebase.firestore().collection('backendTokens').doc(bid).set({ token, updatedAt: Date.now() });
+        _pushState = 'granted'; renderCashier();
+        if (before !== 'granted' || interactive) alert('✅ 關店通知已開啟！\n顧客下單時，即使這台網頁關著也會跳通知＋響。');
+      } catch (e) { if (interactive) alert('設定失敗：' + ((e && e.message) || e)); console.warn('後端推播註冊略過', e); }
     }
     // 提示音開關（預設開，記在 localStorage）
     let soundEnabled = true;
