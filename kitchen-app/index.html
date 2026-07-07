@@ -96,6 +96,7 @@
           <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);">${syncModeLabel()} · 自動更新</div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <button class="pill-button" data-action="set-device" style="cursor:pointer;">📟 本機代碼：${getDeviceCode()}</button>
+            <button class="pill-button" data-action="toggle-sound" style="cursor:pointer;">${soundEnabled ? '🔔 提示音：開' : '🔕 提示音：關'}</button>
             <button class="pill-button" data-action="refresh" style="cursor:pointer;">重新整理</button>
             <button class="pill-button" data-action="clear-orders" style="cursor:pointer;">清除今日</button>
           </div>
@@ -217,6 +218,8 @@
           renderKitchen();
           syncUpdateOrder(id, { rejected: true, rejectReason: '', updatedAt: Date.now() });
         }
+      } else if (action === 'toggle-sound') {
+        toggleSound();
       } else if (action === 'refresh') {
         renderKitchen();
       } else if (action === 'clear-orders') {
@@ -226,9 +229,80 @@
       }
     }
 
+    // ===== 新訂單提示音（Web Audio，免外部音檔）=====
+    let _audioCtx = null;
+    function _getAudioCtx() {
+      if (_audioCtx) return _audioCtx;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      _audioCtx = new AC();
+      return _audioCtx;
+    }
+    function _unlockAudio() {
+      const ctx = _getAudioCtx();
+      if (ctx && ctx.state === 'suspended') ctx.resume();
+    }
+    document.addEventListener('touchend', _unlockAudio, { passive: true });
+    document.addEventListener('click', _unlockAudio, { passive: true });
+    // 提示音開關（預設開，記在 localStorage）
+    let soundEnabled = true;
+    try { soundEnabled = localStorage.getItem('xyg-kitchen-sound') !== 'off'; } catch (e) {}
+    function toggleSound() {
+      soundEnabled = !soundEnabled;
+      try { localStorage.setItem('xyg-kitchen-sound', soundEnabled ? 'on' : 'off'); } catch (e) {}
+      if (soundEnabled) { _unlockAudio(); playNewOrderSound(); } // 開啟時試響一聲並解鎖音訊
+      renderKitchen();
+    }
+    // 響亮的新訂單鈴聲（響兩輪，音量最大不破音）
+    function playNewOrderSound() {
+      try {
+        const ctx = _getAudioCtx();
+        if (!ctx) return;
+        if (ctx.state === 'suspended') ctx.resume();
+        const now = ctx.currentTime;
+        const master = ctx.createDynamicsCompressor();
+        master.threshold.value = -8; master.knee.value = 6; master.ratio.value = 14;
+        master.attack.value = 0.002; master.release.value = 0.25;
+        const outGain = ctx.createGain();
+        outGain.gain.value = 1.0;
+        master.connect(outGain).connect(ctx.destination);
+        const seq = [1174.66, 880, 1174.66]; // 引起注意的「叮咚叮」
+        for (let rep = 0; rep < 2; rep++) {
+          const base = now + rep * 0.95;
+          seq.forEach((freq, i) => {
+            const t0 = base + i * 0.17;
+            const dur = 0.55;
+            [['triangle', 1, 0.95], ['sine', 2, 0.5]].forEach(([type, mult, peak]) => {
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              osc.type = type;
+              osc.frequency.value = freq * mult;
+              gain.gain.setValueAtTime(0.0001, t0);
+              gain.gain.exponentialRampToValueAtTime(peak, t0 + 0.012);
+              gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+              osc.connect(gain).connect(master);
+              osc.start(t0);
+              osc.stop(t0 + dur + 0.05);
+            });
+          });
+        }
+        if (navigator.vibrate) navigator.vibrate([120, 60, 120, 60, 200]);
+      } catch (e) {}
+    }
+    // 偵測是否有新的「新訂單」進來（首次同步不響，避免載入時把既有訂單全部當成新單）
+    let _knownIds = null;
+    function checkNewOrders(list) {
+      const ids = new Set(list.map(o => o.id));
+      if (_knownIds === null) { _knownIds = ids; return; } // 第一次載入：只記錄不響
+      const hasNew = list.some(o => !_knownIds.has(o.id) && o.status === 'new' && !o.rejected);
+      _knownIds = ids;
+      if (hasNew && soundEnabled) playNewOrderSound();
+    }
+
     renderKitchen();
     initSync(list => {
       orders = list;
+      checkNewOrders(list); // 有新訂單就響鈴提醒
       renderKitchen();
     }, { today: true });
 
