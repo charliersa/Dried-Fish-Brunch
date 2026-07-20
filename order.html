@@ -800,15 +800,6 @@
       }
       _prevNotified = !!o.notified;
     }
-    // 叫號板：只要有「任何」新號碼被廚房通知取餐就響（自己的訂單由上面處理，不重複響）
-    let _knownReadyIds = null;
-    function checkBoardReady(list) {
-      const ids = new Set(list.filter(o => isToday(o.createdAt) && !o.rejected && o.notified && !o.picked).map(o => o.id));
-      if (_knownReadyIds === null) { _knownReadyIds = ids; return; } // 首次載入不響，避免把既有號碼全當成新的
-      const fresh = [...ids].filter(id => !_knownReadyIds.has(id) && id !== state.currentOrderId);
-      _knownReadyIds = ids;
-      if (fresh.length) playReadySound();
-    }
     // 顧客授權通知 → 取得 FCM token 存進訂單，餐點完成時才推播得到（關網頁也收得到）
     async function ensureOrderPush(order) {
       try {
@@ -889,7 +880,6 @@
     initSync(list => {
       orders = list;
       checkMyOrderReady(list); // 餐點完成 → 響鈴通知顧客
-      checkBoardReady(list);   // 叫號板：任何號碼被叫到都響
       // 看狀態頁或叫號板時，雲端更新要即時反映（叫號板會自動更新）
       if (state.currentOrderId || state.showBoard) renderCustomer();
     }, { today: true });
