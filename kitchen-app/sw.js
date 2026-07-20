@@ -1,5 +1,5 @@
 // 內場製作台 App（獨立版）Service Worker
-const CACHE_NAME = 'xyg-kitchen-pwa-v3';
+const CACHE_NAME = 'xyg-kitchen-pwa-v4';
 const ASSETS = [
   './',
   './index.html',

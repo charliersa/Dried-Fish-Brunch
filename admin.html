@@ -1023,9 +1023,23 @@
       app.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => handleAction(b)));
     }
 
+    // 會寫入設定的動作；雲端資料還沒載入完就執行會用預設值覆蓋掉雲端真實資料
+    const WRITE_ACTIONS = [
+      // → saveMenu
+      'item-save', 'item-del', 'item-active', 'item-sold', 'cat-add', 'cat-del', 'cat-rename', 'menu-reset-default',
+      // → saveEnt
+      'ent-save', 'ent-del', 'ing-plus', 'ing-minus', 'eq-cycle',
+      // → saveConfig
+      'save-close-time', 'hist-save-sheet',
+    ];
+
     function handleAction(b) {
       const a = b.dataset.action;
       const cat = b.dataset.cat, id = b.dataset.id, kind = b.dataset.kind;
+      if (WRITE_ACTIONS.indexOf(a) !== -1 && !isConfigLoaded()) {
+        showMessage('⚠️ 雲端資料尚未載入完成，請稍候再操作（避免覆蓋既有資料）');
+        return;
+      }
       if (a === 'hist-today') { histScope = 'today'; renderAdmin(); }
       else if (a === 'hist-all') { histScope = 'all'; renderAdmin(); }
       else if (a === 'hist-del') { if (confirm('確定刪除這筆訂單？此動作無法復原，且會從雲端同步移除。')) syncDeleteOrder(id); }
