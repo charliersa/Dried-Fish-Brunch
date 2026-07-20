@@ -120,12 +120,30 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
   <script src="firebase-config.js"></script>
+  <script src="neworder-sound.js"></script>
   <script src="shared.js"></script>
   <script>document.head.insertAdjacentHTML('beforeend', '<style>' + getSharedStyles() + '</style>');</script>
   <script>
     const display = document.getElementById('display');
     let orders = loadOrders();
     let lastCompleted = null;
+
+    // 叫號提示音（全系統唯一音源 鈴聲.mp3）；瀏覽器要求先有一次互動才能出聲
+    const _alertAudio = new Audio(window.ALERT_SOUND_URI || '');
+    _alertAudio.preload = 'auto';
+    let _audioReady = false;
+    function _unlockAudio() {
+      try {
+        _alertAudio.volume = 0;
+        const p = _alertAudio.play();
+        if (p && p.then) p.then(() => {
+          _alertAudio.pause(); _alertAudio.currentTime = 0; _alertAudio.volume = 1;
+          if (!_audioReady) { _audioReady = true; renderDisplay(); }
+        }).catch(() => { _alertAudio.volume = 1; });
+      } catch (e) { _alertAudio.volume = 1; }
+    }
+    document.addEventListener('touchend', _unlockAudio, { passive: true });
+    document.addEventListener('click', _unlockAudio, { passive: true });
 
     function renderDisplay() {
       const today = orders.filter(o => isToday(o.createdAt) && !o.rejected);
@@ -136,8 +154,8 @@
       const topId = ready.length ? ready[0].id : null;
       if (topId && lastCompleted !== topId && typeof Audio !== 'undefined') {
         try {
-          const beep = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAAB9AAACABAAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj==');
-          beep.play().catch(() => {});
+          _alertAudio.currentTime = 0;
+          _alertAudio.play().catch(() => {});
         } catch (e) {}
       }
       lastCompleted = topId;
@@ -163,6 +181,7 @@
             <h1>🐟 小魚乾早午餐</h1>
             <p>🔴 紅色 = 已可取餐　🔵 藍色 = 準備中</p>
           </div>
+          ${!_audioReady ? `<div style="background:#e05252;color:#fff;font-size:22px;font-weight:900;padding:12px 20px;border-radius:14px;margin:0 18px 12px;cursor:pointer;">⚠️ 叫號提示音未啟用 — 請點一下畫面</div>` : ''}
           <div class="display-main">${readyHtml}</div>
           ${prepHtml}
         </div>

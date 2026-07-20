@@ -1,11 +1,10 @@
 // 內場製作台 App（獨立版）Service Worker
-const CACHE_NAME = 'xyg-kitchen-pwa-v2';
+const CACHE_NAME = 'xyg-kitchen-pwa-v3';
 const ASSETS = [
   './',
   './index.html',
   './shared.js',
   './neworder-sound.js',
-  './kitchen-sound.js',
   './firebase-config.js',
   './manifest.json',
   './sw.js',

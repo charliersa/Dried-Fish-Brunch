@@ -42,7 +42,6 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
   <script src="firebase-config.js"></script>
   <script src="neworder-sound.js"></script>
-  <script src="kitchen-sound.js"></script>
   <script src="shared.js"></script>
   <script>document.head.insertAdjacentHTML('beforeend', '<style>' + getSharedStyles() + '</style>');</script>
   <script>
@@ -278,7 +277,7 @@
       return _audioCtx;
     }
     // 提示音音檔（HTMLAudio，相容性最高）；使用者互動一次即解鎖，之後可自動播放
-    const _alertAudio = new Audio(window.KITCHEN_SOUND_URI || window.ALERT_SOUND_URI || '');
+    const _alertAudio = new Audio(window.ALERT_SOUND_URI || '');
     _alertAudio.preload = 'auto';
     let _bpDone = false;
     let _pushState = (typeof Notification !== 'undefined') ? Notification.permission : 'unsupported'; // granted/denied/default/unsupported
@@ -342,44 +341,19 @@
     function playNewOrderSound() {
       let ok = false;
       try {
-        if (window.KITCHEN_SOUND_URI || window.ALERT_SOUND_URI) {
+        if (window.ALERT_SOUND_URI) {
           _alertAudio.currentTime = 0;
           _alertAudio.volume = 1;
           const p = _alertAudio.play();
           if (p) {
             if (p.then) p.then(() => _markAudioReady(true));
             // 播不出來 → 標記未解鎖（畫面會跳出警告）並試合成音
-            if (p.catch) p.catch(() => { _markAudioReady(false); _playBeepWebAudio(); });
+            if (p.catch) p.catch(() => { _markAudioReady(false); });
           }
           ok = true;
         }
       } catch (e) {}
-      if (!ok) _playBeepWebAudio();
       if (navigator.vibrate) navigator.vibrate([120, 60, 120, 60, 200]);
-    }
-    function _playBeepWebAudio() {
-      try {
-        const ctx = _getAudioCtx();
-        if (!ctx) return;
-        if (ctx.state === 'suspended') ctx.resume();
-        const now = ctx.currentTime;
-        const seq = [880, 1174.66, 1568];
-        for (let rep = 0; rep < 2; rep++) {
-          seq.forEach((freq, i) => {
-            const t0 = now + rep * 0.85 + i * 0.16;
-            const osc = ctx.createOscillator();
-            const g = ctx.createGain();
-            osc.type = 'square';
-            osc.frequency.value = freq;
-            g.gain.setValueAtTime(0.0001, t0);
-            g.gain.exponentialRampToValueAtTime(0.4, t0 + 0.02);
-            g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.42);
-            osc.connect(g).connect(ctx.destination);
-            osc.start(t0);
-            osc.stop(t0 + 0.46);
-          });
-        }
-      } catch (e) {}
     }
     // 偵測是否有新的「新訂單」進來（首次同步不響，避免載入時把既有訂單全部當成新單）
     let _knownIds = null;
