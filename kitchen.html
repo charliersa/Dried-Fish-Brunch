@@ -42,6 +42,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
   <script src="firebase-config.js"></script>
   <script src="neworder-sound.js"></script>
+  <script src="kitchen-sound.js"></script>
   <script src="shared.js"></script>
   <script>document.head.insertAdjacentHTML('beforeend', '<style>' + getSharedStyles() + '</style>');</script>
   <script>
@@ -111,6 +112,7 @@
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <button class="pill-button" data-action="set-device" style="cursor:pointer;">📟 本機代碼：${getDeviceCode()}</button>
             <button class="pill-button" data-action="toggle-sound" style="cursor:pointer;">${soundEnabled ? '🔔 提示音：開' : '🔕 提示音：關'}</button>
+            ${(soundEnabled && !_audioReady) ? `<button class="pill-button" data-action="enable-sound" style="cursor:pointer;border-color:#e05252;color:#e05252;font-weight:900;">⚠️ 提示音未啟用 — 點我測試</button>` : ''}
             <button class="pill-button" data-action="enable-push" style="cursor:pointer;${_pushState === 'granted' ? 'border-color:#3fa877;color:#3fa877;' : 'border-color:#e89a2b;color:#e89a2b;'}">${_pushState === 'granted' ? '✅ 關店通知：開' : '🔔 開啟關店通知'}</button>
             <button class="pill-button" data-action="refresh" style="cursor:pointer;">重新整理</button>
             <button class="pill-button" data-action="clear-orders" style="cursor:pointer;">清除今日</button>
@@ -276,17 +278,30 @@
       return _audioCtx;
     }
     // 提示音音檔（HTMLAudio，相容性最高）；使用者互動一次即解鎖，之後可自動播放
-    const _alertAudio = new Audio(window.ALERT_SOUND_URI || '');
+    const _alertAudio = new Audio(window.KITCHEN_SOUND_URI || window.ALERT_SOUND_URI || '');
     _alertAudio.preload = 'auto';
     let _bpDone = false;
     let _pushState = (typeof Notification !== 'undefined') ? Notification.permission : 'unsupported'; // granted/denied/default/unsupported
+    // 音訊是否真的已解鎖（瀏覽器自動播放封鎖）；沒解鎖的話新訂單不會有聲音
+    let _audioReady = false;
+    function _markAudioReady(v) {
+      if (_audioReady === v) return;
+      _audioReady = v;
+      try { renderKitchen(); } catch (e) {}
+    }
     function _unlockAudio() {
       const ctx = _getAudioCtx();
-      if (ctx && ctx.state === 'suspended') ctx.resume();
+      if (ctx && ctx.state === 'suspended') {
+        const r = ctx.resume();
+        if (r && r.then) r.then(() => { if (ctx.state === 'running') _markAudioReady(true); }).catch(() => {});
+      }
       try {
         _alertAudio.volume = 0;
         const p = _alertAudio.play();
-        if (p && p.then) p.then(() => { _alertAudio.pause(); _alertAudio.currentTime = 0; _alertAudio.volume = 1; }).catch(() => { _alertAudio.volume = 1; });
+        if (p && p.then) p.then(() => {
+          _alertAudio.pause(); _alertAudio.currentTime = 0; _alertAudio.volume = 1;
+          _markAudioReady(true); // 真的播得出來才算解鎖
+        }).catch(() => { _alertAudio.volume = 1; });
       } catch (e) { _alertAudio.volume = 1; }
       if (!_bpDone) { _bpDone = true; registerBackendPush(); } // 首次互動時註冊後端推播（關網頁也收得到新單）
     }
@@ -327,11 +342,15 @@
     function playNewOrderSound() {
       let ok = false;
       try {
-        if (window.ALERT_SOUND_URI) {
+        if (window.KITCHEN_SOUND_URI || window.ALERT_SOUND_URI) {
           _alertAudio.currentTime = 0;
           _alertAudio.volume = 1;
           const p = _alertAudio.play();
-          if (p && p.catch) p.catch(() => _playBeepWebAudio());
+          if (p) {
+            if (p.then) p.then(() => _markAudioReady(true));
+            // 播不出來 → 標記未解鎖（畫面會跳出警告）並試合成音
+            if (p.catch) p.catch(() => { _markAudioReady(false); _playBeepWebAudio(); });
+          }
           ok = true;
         }
       } catch (e) {}

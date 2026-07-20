@@ -859,7 +859,7 @@
           const off = it.active === false, so = !!it.soldOut;
           return `
           <div class="ent-row" style="opacity:${off ? .5 : 1};">
-            <div style="font-weight:700;">${escapeHtml(it.name)} <span style="color:var(--ink-soft);font-weight:400;">$${it.price}</span>${so ? ' <span class="badge" style="background:#fcf1dc;color:#e89a2b;">售完</span>' : ''}${(it.opts && it.opts.length) ? `<div style="font-size:11px;color:var(--ink-soft);font-weight:400;margin-top:2px;">📝 ${it.opts.map(escapeHtml).join('、')}</div>` : ''}</div>
+            <div style="font-weight:700;">${escapeHtml(it.name)} <span style="color:var(--ink-soft);font-weight:400;">$${it.price}</span>${so ? ' <span class="badge" style="background:#fcf1dc;color:#e89a2b;">售完</span>' : ''}${(it.opts && it.opts.length) ? `<div style="font-size:11px;color:var(--ink-soft);font-weight:400;margin-top:2px;">📝 ${it.opts.map(escapeHtml).join('、')}</div>` : ''}${(it.addons && it.addons.length) ? `<div style="font-size:11px;color:var(--pink);font-weight:400;margin-top:2px;">💰 ${it.addons.map(a => '+$' + a.price + ' ' + escapeHtml(a.name)).join('、')}</div>` : ''}</div>
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
               <button class="mini-btn" data-action="item-active" data-cat="${cat.id}" data-id="${it.id}">${off ? '上架' : '下架'}</button>
               <button class="mini-btn" data-action="item-sold" data-cat="${cat.id}" data-id="${it.id}" style="background:${so ? '#e1f4ea' : '#fcf1dc'};color:${so ? '#3fa877' : '#e89a2b'};border:none;">${so ? '補貨' : '售完'}</button>
@@ -959,6 +959,19 @@
             <input id="item-price" type="number" placeholder="價格" value="${editItem.price != null ? editItem.price : ''}" style="text-align:left;letter-spacing:normal;" />
             <textarea id="item-opts" placeholder="備註選項（一行一個，例：&#10;不要沙拉&#10;不要蕃茄醬）" style="width:100%;min-height:96px;margin-top:8px;border:1.5px solid var(--line);border-radius:12px;padding:11px 14px;font:inherit;color:var(--ink);outline:none;box-sizing:border-box;resize:vertical;text-align:left;letter-spacing:normal;">${escapeHtml(editItem.opts || '')}</textarea>
             <div style="font-size:12px;color:var(--ink-soft);margin-top:4px;text-align:left;">顧客點此品項時可一鍵勾選；留空則用該分類預設選項。</div>
+            <div style="margin-top:12px;text-align:left;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+                <div style="font-size:12px;color:var(--ink-soft);font-weight:700;">💰 加價選項（後台記錄用，不影響顧客點餐與總價）</div>
+                <button class="mini-btn" data-action="addon-add" style="flex:none;">＋ 新增</button>
+              </div>
+              ${(editItem.addons || []).length ? (editItem.addons || []).map((ad, i) => `
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+                <span style="color:var(--pink);font-weight:900;">+$</span>
+                <input id="item-addon-price-${i}" type="number" placeholder="金額" value="${ad.price != null ? escapeHtml(String(ad.price)) : ''}" style="width:74px;flex:none;box-sizing:border-box;text-align:left;letter-spacing:normal;margin:0;" />
+                <input id="item-addon-name-${i}" placeholder="加價項目名稱（例：加蛋）" value="${escapeHtml(ad.name || '')}" style="flex:1;width:auto;box-sizing:border-box;text-align:left;letter-spacing:normal;margin:0;" />
+                <button class="mini-btn" data-action="addon-del" data-idx="${i}" style="flex:none;">🗑</button>
+              </div>`).join('') : '<div style="font-size:12px;color:#9db4bf;padding:2px 0 4px;">尚無加價選項，按右上「＋ 新增」加入。</div>'}
+            </div>
             <div class="pin-actions">
               <button class="pill-button" style="flex:1;" data-action="item-cancel">取消</button>
               <button data-action="item-save" style="flex:1;border:none;background:var(--pink);color:#fff;font-weight:900;padding:11px;border-radius:12px;">儲存</button>
@@ -1030,8 +1043,10 @@
       else if (a === 'item-active') { toggleItem(cat, id, 'active'); }
       else if (a === 'item-sold') { toggleItem(cat, id, 'soldOut'); }
       else if (a === 'item-del') { if (confirm('確定刪除此品項？')) deleteItem(cat, id); }
-      else if (a === 'item-edit') { const it = findItem(cat, id); editItem = { catId: cat, id, name: it.name, price: it.price, opts: (it.opts || []).join('\n'), isNew: false }; renderAdmin(); }
-      else if (a === 'item-add') { editItem = { catId: cat, name: '', price: '', opts: '', isNew: true }; renderAdmin(); }
+      else if (a === 'item-edit') { const it = findItem(cat, id); editItem = { catId: cat, id, name: it.name, price: it.price, opts: (it.opts || []).join('\n'), addons: loadAddons(it), isNew: false }; renderAdmin(); }
+      else if (a === 'item-add') { editItem = { catId: cat, name: '', price: '', opts: '', addons: [], isNew: true }; renderAdmin(); }
+      else if (a === 'addon-add') { captureItemModal(); editItem.addons = [...(editItem.addons || []), { name: '', price: '' }]; renderAdmin(); }
+      else if (a === 'addon-del') { captureItemModal(); const ix = parseInt(b.dataset.idx, 10); editItem.addons = (editItem.addons || []).filter((_, i) => i !== ix); renderAdmin(); }
       else if (a === 'item-cancel') { editItem = null; renderAdmin(); }
       else if (a === 'item-save') { saveItem(); }
       else if (a === 'ent-add') { openEnt(kind, null); }
@@ -1085,17 +1100,40 @@
       cfg.menu = cfg.menu.map(c => c.id !== catId ? c : Object.assign({}, c, { items: c.items.filter(i => i.id !== id) }));
       saveMenu(cfg.menu); renderAdmin();
     }
+    // 讀取品項既有的加價選項；相容舊的 add5/add10/add15 欄位（自動轉成清單）
+    function loadAddons(it) {
+      let list = Array.isArray(it.addons) ? it.addons.map(a => ({ name: a.name || '', price: a.price != null ? a.price : '' })) : [];
+      if (!list.length) {
+        [['5', it.add5], ['10', it.add10], ['15', it.add15]].forEach(([p, nm]) => { if (nm) list.push({ name: nm, price: parseInt(p, 10) }); });
+      }
+      return list;
+    }
+    // 重建彈窗前，先把目前輸入框的值寫回 editItem，避免新增/刪除加價列時遺失
+    function captureItemModal() {
+      if (!editItem) return;
+      const n = document.getElementById('item-name'); if (n) editItem.name = n.value;
+      const p = document.getElementById('item-price'); if (p) editItem.price = p.value;
+      const o = document.getElementById('item-opts'); if (o) editItem.opts = o.value;
+      (editItem.addons || []).forEach((ad, i) => {
+        const nm = document.getElementById('item-addon-name-' + i);
+        const pr = document.getElementById('item-addon-price-' + i);
+        if (nm) ad.name = nm.value;
+        if (pr) ad.price = pr.value;
+      });
+    }
     function saveItem() {
-      const name = (document.getElementById('item-name').value || '').trim();
-      const price = parseInt(document.getElementById('item-price').value, 10);
-      const optsEl = document.getElementById('item-opts');
-      const opts = ((optsEl && optsEl.value) || '').split('\n').map(s => s.trim()).filter(Boolean);
+      captureItemModal();
+      const name = (editItem.name || '').trim();
+      const price = parseInt(editItem.price, 10);
+      const opts = (editItem.opts || '').split('\n').map(s => s.trim()).filter(Boolean);
+      // 只保留「有填名稱且金額為有效數字」的加價選項，空白列自動略過
+      const addons = (editItem.addons || []).map(a => ({ name: (a.name || '').trim(), price: parseInt(a.price, 10) })).filter(a => a.name && !isNaN(a.price) && a.price >= 0);
       if (!name || !(price >= 0)) { showMessage('請填寫品名與價格'); return; }
       if (editItem.isNew) {
         const nid = 'x' + Date.now();
-        cfg.menu = cfg.menu.map(c => c.id !== editItem.catId ? c : Object.assign({}, c, { items: [...c.items, { id: nid, name, price, opts, active: true, soldOut: false }] }));
+        cfg.menu = cfg.menu.map(c => c.id !== editItem.catId ? c : Object.assign({}, c, { items: [...c.items, { id: nid, name, price, opts, addons, active: true, soldOut: false }] }));
       } else {
-        cfg.menu = cfg.menu.map(c => c.id !== editItem.catId ? c : Object.assign({}, c, { items: c.items.map(i => i.id !== editItem.id ? i : Object.assign({}, i, { name, price, opts })) }));
+        cfg.menu = cfg.menu.map(c => c.id !== editItem.catId ? c : Object.assign({}, c, { items: c.items.map(i => i.id !== editItem.id ? i : Object.assign({}, i, { name, price, opts, addons })) }));
       }
       editItem = null; saveMenu(cfg.menu); renderAdmin();
     }
