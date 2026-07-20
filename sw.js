@@ -1,4 +1,4 @@
-const CACHE_NAME = 'xyg-order-pwa-v13';
+const CACHE_NAME = 'xyg-order-pwa-v14';
 const ASSETS = [
   './',
   './index.html',

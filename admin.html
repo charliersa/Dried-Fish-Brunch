@@ -397,6 +397,7 @@
     let aTab = 'revenue';
     let editItem = null; // 菜單品項編輯
     let autoSaveStatus = ''; // '' | 'saving' | 'saved'（品項彈窗的自動儲存狀態）
+    let entAutoStatus = ''; // 同上，營運資料彈窗（員工/食材/設備/成本）
     let editEnt = null;  // 員工/食材/設備/成本編輯
     let histScope = 'today';
     let reportPeriod = 'day'; // 報表期間：day | week | month
@@ -992,8 +993,9 @@
           <div class="pin-overlay"><div class="pin-box" style="max-width:360px;">
             <h3 style="font-size:17px;font-weight:900;margin:0 0 14px;">${editEnt.isNew ? '新增' : '編輯'}${kindLabel}</h3>
             ${defs.map(d => `<input id="ent-${d.key}" type="${d.type === 'number' ? 'number' : 'text'}" placeholder="${d.label}" value="${escapeHtml(editEnt.data[d.key] != null ? String(editEnt.data[d.key]) : '')}" style="text-align:left;letter-spacing:normal;margin-bottom:8px;" />`).join('')}
+            <div id="ent-autosave" style="font-size:12px;color:var(--green);font-weight:700;text-align:right;min-height:16px;margin-top:6px;">${entAutoStatus === 'saving' ? '儲存中…' : entAutoStatus === 'saved' ? '✓ 已自動儲存' : ''}</div>
             <div class="pin-actions">
-              <button class="pill-button" style="flex:1;" data-action="ent-cancel">取消</button>
+              <button class="pill-button" style="flex:1;" data-action="ent-cancel">${editEnt.autoSaved ? '關閉' : '取消'}</button>
               <button data-action="ent-save" style="flex:1;border:none;background:var(--pink);color:#fff;font-weight:900;padding:11px;border-radius:12px;">儲存</button>
             </div>
           </div></div>`;
@@ -1007,6 +1009,11 @@
       const _scrollY = window.scrollY;
       const _tabsBar = app.querySelector('.admin-tabs');
       const _tabsLeft = _tabsBar ? _tabsBar.scrollLeft : 0;
+      // 記住焦點欄位與游標位置：自動儲存會觸發雲端快照而重繪，
+      // 沒有還原的話打字打到一半游標會跳掉
+      const _act = document.activeElement;
+      const _focusId = _act && _act.id ? _act.id : null;
+      const _caret = _act && typeof _act.selectionStart === 'number' ? _act.selectionStart : null;
       const bodyFns = { revenue: tabRevenue, ops: tabOps, cost: tabCost, payroll: tabPayroll, ing: tabIng, equip: tabEquip, menu: tabMenu, history: tabHistory };
       app.innerHTML = `
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
@@ -1021,6 +1028,15 @@
       const _newTabsBar = app.querySelector('.admin-tabs');
       if (_newTabsBar) _newTabsBar.scrollLeft = _tabsLeft;
       window.scrollTo(0, _scrollY);
+      if (_focusId) {
+        const el = document.getElementById(_focusId);
+        if (el) {
+          el.focus();
+          if (_caret != null && typeof el.setSelectionRange === 'function') {
+            try { el.setSelectionRange(_caret, _caret); } catch (e) {}
+          }
+        }
+      }
     }
 
     function bindAdmin() {
@@ -1028,6 +1044,39 @@
       if (logout) logout.addEventListener('click', () => { unlocked = false; try { localStorage.removeItem(ADMIN_AUTH_KEY); } catch (e) {} renderLogin(); });
       app.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { aTab = b.dataset.tab; renderAdmin(); }));
       app.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => handleAction(b)));
+      // 營運資料彈窗（員工/食材/設備/成本）：欄位變動即排程自動儲存
+      if (editEnt) {
+        fieldDefs(editEnt.kind).forEach(d => {
+          const el = document.getElementById('ent-' + d.key);
+          if (el) el.addEventListener('input', scheduleEntAutoSave);
+        });
+      }
+      // 結單時間與開關：改完立刻存（下拉/勾選不需要延遲）
+      ['close-time', 'close-enabled'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('change', () => {
+          if (!isConfigLoaded()) { showMessage('⚠️ 雲端資料尚未載入完成，請稍候再操作'); return; }
+          const t = document.getElementById('close-time'), en = document.getElementById('close-enabled');
+          cfg = Object.assign({}, cfg, { closeTime: (t && t.value) || '11:50', closeEnabled: !!(en && en.checked) });
+          saveConfig(cfg);
+          showMessage(cfg.closeEnabled ? ('已自動儲存，結單時間：' + cfg.closeTime) : '已自動儲存，結單暫停（測試模式）');
+        });
+      });
+      // Google Sheet 連結：停止輸入約 1.2 秒自動存
+      const _su = document.getElementById('sheet-url');
+      if (_su) _su.addEventListener('input', () => {
+        if (sheetSaveTimer) clearTimeout(sheetSaveTimer);
+        sheetSaveTimer = setTimeout(() => {
+          sheetSaveTimer = null;
+          if (!isConfigLoaded()) return;
+          const el = document.getElementById('sheet-url');
+          if (!el) return;
+          cfg = Object.assign({}, cfg, { sheetUrl: el.value.trim() });
+          saveConfig(cfg);
+          showMessage('已自動儲存 Google Sheet 連結');
+        }, 1200);
+      });
       // 品項彈窗：任何欄位變動都排程一次自動儲存
       if (editItem) {
         const ids = ['item-name', 'item-price', 'item-opts'];
@@ -1078,10 +1127,10 @@
       else if (a === 'addon-del') { captureItemModal(); const ix = parseInt(b.dataset.idx, 10); editItem.addons = (editItem.addons || []).filter((_, i) => i !== ix); renderAdmin(); scheduleAutoSave(); }
       else if (a === 'item-cancel') { if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null; } editItem = null; autoSaveStatus = ''; renderAdmin(); }
       else if (a === 'item-save') { saveItem(); }
-      else if (a === 'ent-add') { openEnt(kind, null); }
-      else if (a === 'ent-edit') { openEnt(kind, id); }
+      else if (a === 'ent-add') { entAutoStatus = ''; openEnt(kind, null); }
+      else if (a === 'ent-edit') { entAutoStatus = ''; openEnt(kind, id); }
       else if (a === 'ent-del') { if (confirm('確定刪除？')) deleteEnt(kind, id); }
-      else if (a === 'ent-cancel') { editEnt = null; renderAdmin(); }
+      else if (a === 'ent-cancel') { if (entSaveTimer) { clearTimeout(entSaveTimer); entSaveTimer = null; } editEnt = null; entAutoStatus = ''; renderAdmin(); }
       else if (a === 'ent-save') { commitEnt(); }
       else if (a === 'eq-cycle') { cycleStatus(id); }
       else if (a === 'ing-plus') { adjustStock(id, 1); }
@@ -1237,14 +1286,60 @@
       editEnt = { kind, id: id || null, isNew: !item, data };
       renderAdmin();
     }
-    function commitEnt() {
+    // 把營運資料彈窗的內容寫進 cfg.ent；回傳 false = 第一個必填欄位還沒填
+    function applyEntToCfg() {
       const defs = fieldDefs(editEnt.kind); const rec = {};
-      for (const d of defs) { let v = document.getElementById('ent-' + d.key).value; if (d.type === 'number') { v = parseFloat(v); if (isNaN(v)) v = 0; } else v = (v || '').trim(); rec[d.key] = v; }
-      if (!rec[defs[0].key]) { showMessage('請填寫' + defs[0].label); return; }
+      for (const d of defs) {
+        const el = document.getElementById('ent-' + d.key);
+        if (!el) return false;
+        let v = el.value;
+        if (d.type === 'number') { v = parseFloat(v); if (isNaN(v)) v = 0; } else v = (v || '').trim();
+        rec[d.key] = v;
+      }
+      if (!rec[defs[0].key]) return false;
       const lk = entListKey(editEnt.kind); const list = (cfg.ent[lk] || []).slice();
-      if (editEnt.isNew) { rec.id = editEnt.kind + Date.now(); if (editEnt.kind === 'equipment') rec.status = '正常'; list.push(rec); }
-      else { const i = list.findIndex(x => x.id === editEnt.id); if (i >= 0) list[i] = Object.assign({}, list[i], rec); }
-      cfg.ent = Object.assign({}, cfg.ent, { [lk]: list }); editEnt = null; saveEnt(cfg.ent); renderAdmin();
+      if (editEnt.isNew) {
+        rec.id = editEnt.kind + Date.now();
+        if (editEnt.kind === 'equipment') rec.status = '正常';
+        editEnt.id = rec.id;
+        editEnt.isNew = false; // 已建立，之後改為「更新」，避免每次自動儲存都新增一筆
+        list.push(rec);
+      } else {
+        const i = list.findIndex(x => x.id === editEnt.id); if (i >= 0) list[i] = Object.assign({}, list[i], rec);
+      }
+      cfg.ent = Object.assign({}, cfg.ent, { [lk]: list });
+      return true;
+    }
+
+    // ---------- 營運資料彈窗的自動儲存 ----------
+    let entSaveTimer = null;
+    let sheetSaveTimer = null;
+    function setEntStatus(s) {
+      entAutoStatus = s;
+      const el = document.getElementById('ent-autosave');
+      if (el) el.textContent = s === 'saving' ? '儲存中…' : s === 'saved' ? '✓ 已自動儲存' : '';
+    }
+    function scheduleEntAutoSave() {
+      if (entSaveTimer) clearTimeout(entSaveTimer);
+      entSaveTimer = setTimeout(autoSaveEnt, 1200);
+    }
+    function autoSaveEnt() {
+      entSaveTimer = null;
+      if (!editEnt) return;
+      if (!isConfigLoaded()) return; // 雲端還沒載入完成，一律不寫入
+      if (!applyEntToCfg()) return;  // 必填欄位還沒填完，安靜等待
+      editEnt.autoSaved = true;
+      setEntStatus('saving');
+      Promise.resolve(saveEnt(cfg.ent))
+        .then(() => setEntStatus('saved'))
+        .catch(() => setEntStatus(''));
+    }
+
+    function commitEnt() {
+      if (entSaveTimer) { clearTimeout(entSaveTimer); entSaveTimer = null; }
+      const defs = fieldDefs(editEnt.kind);
+      if (!applyEntToCfg()) { showMessage('請填寫' + defs[0].label); return; }
+      editEnt = null; entAutoStatus = ''; saveEnt(cfg.ent); renderAdmin();
     }
     function deleteEnt(kind, id) {
       const lk = entListKey(kind);
