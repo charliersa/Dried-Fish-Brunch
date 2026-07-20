@@ -872,8 +872,9 @@
         return `
           <div class="admin-card">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px;flex-wrap:wrap;">
-              <h3 style="margin:0;">${cat.icon} ${escapeHtml(cat.name)}</h3>
+              <h3 style="margin:0;">${cat.icon} ${escapeHtml(cat.name)}${isHiddenForCustomer(cat) ? ' <span class="badge" style="background:#eef2f4;color:#7c93a0;">顧客看不到</span>' : ''}</h3>
               <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                <button class="mini-btn" data-action="cat-visible" data-cat="${cat.id}" style="${isHiddenForCustomer(cat) ? 'border-color:#9db4bf;color:#7c93a0;' : 'border-color:#3fa877;color:#3fa877;'}">${isHiddenForCustomer(cat) ? '🚫 顧客不可見' : '👁 顧客可見'}</button>
                 <button class="mini-btn" data-action="cat-rename" data-cat="${cat.id}">✏️ 改名</button>
                 <button class="mini-btn" data-action="cat-del" data-cat="${cat.id}">🗑 刪除大類</button>
                 <button class="add-btn" data-action="item-add" data-cat="${cat.id}">＋ 新增品項</button>
@@ -1034,7 +1035,7 @@
     // 會寫入設定的動作；雲端資料還沒載入完就執行會用預設值覆蓋掉雲端真實資料
     const WRITE_ACTIONS = [
       // → saveMenu
-      'item-save', 'item-del', 'item-active', 'item-sold', 'cat-add', 'cat-del', 'cat-rename', 'menu-reset-default',
+      'item-save', 'item-del', 'item-active', 'item-sold', 'cat-add', 'cat-del', 'cat-rename', 'cat-visible', 'menu-reset-default',
       // → saveEnt
       'ent-save', 'ent-del', 'ing-plus', 'ing-minus', 'eq-cycle',
       // → saveConfig
@@ -1061,6 +1062,7 @@
       else if (a === 'menu-reset-default') { resetMenuToDefault(); }
       else if (a === 'cat-add') { addCategory(); }
       else if (a === 'cat-rename') { renameCategory(cat); }
+      else if (a === 'cat-visible') { toggleCategoryVisible(cat); }
       else if (a === 'cat-del') { deleteCategory(cat); }
       else if (a === 'item-active') { toggleItem(cat, id, 'active'); }
       else if (a === 'item-sold') { toggleItem(cat, id, 'soldOut'); }
@@ -1099,6 +1101,17 @@
       const nid = 'cat' + Date.now();
       cfg.menu = [...cfg.menu, { id: nid, name, icon, items: [] }];
       saveMenu(cfg.menu); renderAdmin();
+    }
+
+    // 切換分類是否顯示在顧客點餐頁（廚房/收銀/後台一律看得到，不受影響）
+    function toggleCategoryVisible(catId) {
+      const c = cfg.menu.find(x => x.id === catId);
+      if (!c) return;
+      const next = !isHiddenForCustomer(c); // 目前可見 → 切成隱藏，反之亦然
+      cfg.menu = cfg.menu.map(x => x.id !== catId ? x : Object.assign({}, x, { hidden: next }));
+      saveMenu(cfg.menu);
+      showMessage(next ? '已設為顧客看不到' : '已上架到顧客點餐頁');
+      renderAdmin();
     }
     function renameCategory(catId) {
       const c = cfg.menu.find(x => x.id === catId); if (!c) return;
