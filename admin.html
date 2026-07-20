@@ -396,6 +396,7 @@
     let cfg = { menu: CURRENT_MENU, ent: JSON.parse(JSON.stringify(DEFAULT_ENT)) };
     let aTab = 'revenue';
     let editItem = null; // 菜單品項編輯
+    let autoSaveStatus = ''; // '' | 'saving' | 'saved'（品項彈窗的自動儲存狀態）
     let editEnt = null;  // 員工/食材/設備/成本編輯
     let histScope = 'today';
     let reportPeriod = 'day'; // 報表期間：day | week | month
@@ -972,8 +973,9 @@
                 <button class="mini-btn" data-action="addon-del" data-idx="${i}" style="flex:none;">🗑</button>
               </div>`).join('') : '<div style="font-size:12px;color:#9db4bf;padding:2px 0 4px;">尚無加價選項，按右上「＋ 新增」加入。</div>'}
             </div>
+            <div id="item-autosave" style="font-size:12px;color:var(--green);font-weight:700;text-align:right;min-height:16px;margin-top:6px;">${autoSaveStatus === 'saving' ? '儲存中…' : autoSaveStatus === 'saved' ? '✓ 已自動儲存' : ''}</div>
             <div class="pin-actions">
-              <button class="pill-button" style="flex:1;" data-action="item-cancel">取消</button>
+              <button class="pill-button" style="flex:1;" data-action="item-cancel">${editItem.autoSaved ? '關閉' : '取消'}</button>
               <button data-action="item-save" style="flex:1;border:none;background:var(--pink);color:#fff;font-weight:900;padding:11px;border-radius:12px;">儲存</button>
             </div>
           </div></div>`;
@@ -1021,6 +1023,12 @@
       if (logout) logout.addEventListener('click', () => { unlocked = false; try { localStorage.removeItem(ADMIN_AUTH_KEY); } catch (e) {} renderLogin(); });
       app.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { aTab = b.dataset.tab; renderAdmin(); }));
       app.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => handleAction(b)));
+      // 品項彈窗：任何欄位變動都排程一次自動儲存
+      if (editItem) {
+        const ids = ['item-name', 'item-price', 'item-opts'];
+        (editItem.addons || []).forEach((_, i) => ids.push('item-addon-name-' + i, 'item-addon-price-' + i));
+        ids.forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('input', scheduleAutoSave); });
+      }
     }
 
     // 會寫入設定的動作；雲端資料還沒載入完就執行會用預設值覆蓋掉雲端真實資料
@@ -1057,11 +1065,11 @@
       else if (a === 'item-active') { toggleItem(cat, id, 'active'); }
       else if (a === 'item-sold') { toggleItem(cat, id, 'soldOut'); }
       else if (a === 'item-del') { if (confirm('確定刪除此品項？')) deleteItem(cat, id); }
-      else if (a === 'item-edit') { const it = findItem(cat, id); editItem = { catId: cat, id, name: it.name, price: it.price, opts: (it.opts || []).join('\n'), addons: loadAddons(it), isNew: false }; renderAdmin(); }
-      else if (a === 'item-add') { editItem = { catId: cat, name: '', price: '', opts: '', addons: [], isNew: true }; renderAdmin(); }
+      else if (a === 'item-edit') { const it = findItem(cat, id); editItem = { catId: cat, id, name: it.name, price: it.price, opts: (it.opts || []).join('\n'), addons: loadAddons(it), isNew: false }; autoSaveStatus = ''; renderAdmin(); }
+      else if (a === 'item-add') { editItem = { catId: cat, name: '', price: '', opts: '', addons: [], isNew: true }; autoSaveStatus = ''; renderAdmin(); }
       else if (a === 'addon-add') { captureItemModal(); editItem.addons = [...(editItem.addons || []), { name: '', price: '' }]; renderAdmin(); }
-      else if (a === 'addon-del') { captureItemModal(); const ix = parseInt(b.dataset.idx, 10); editItem.addons = (editItem.addons || []).filter((_, i) => i !== ix); renderAdmin(); }
-      else if (a === 'item-cancel') { editItem = null; renderAdmin(); }
+      else if (a === 'addon-del') { captureItemModal(); const ix = parseInt(b.dataset.idx, 10); editItem.addons = (editItem.addons || []).filter((_, i) => i !== ix); renderAdmin(); scheduleAutoSave(); }
+      else if (a === 'item-cancel') { if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null; } editItem = null; autoSaveStatus = ''; renderAdmin(); }
       else if (a === 'item-save') { saveItem(); }
       else if (a === 'ent-add') { openEnt(kind, null); }
       else if (a === 'ent-edit') { openEnt(kind, id); }
@@ -1135,21 +1143,54 @@
         if (pr) ad.price = pr.value;
       });
     }
-    function saveItem() {
+    // 把彈窗目前內容寫進 cfg.menu；回傳 false = 品名或價格還沒填完，不動資料
+    function applyItemToMenu() {
       captureItemModal();
       const name = (editItem.name || '').trim();
       const price = parseInt(editItem.price, 10);
+      if (!name || !(price >= 0)) return false;
       const opts = (editItem.opts || '').split('\n').map(s => s.trim()).filter(Boolean);
       // 只保留「有填名稱且金額為有效數字」的加價選項，空白列自動略過
       const addons = (editItem.addons || []).map(a => ({ name: (a.name || '').trim(), price: parseInt(a.price, 10) })).filter(a => a.name && !isNaN(a.price) && a.price >= 0);
-      if (!name || !(price >= 0)) { showMessage('請填寫品名與價格'); return; }
       if (editItem.isNew) {
         const nid = 'x' + Date.now();
+        editItem.id = nid;
+        editItem.isNew = false; // 已建立，之後改為「更新」，避免每次自動儲存都新增一筆
         cfg.menu = cfg.menu.map(c => c.id !== editItem.catId ? c : Object.assign({}, c, { items: [...c.items, { id: nid, name, price, opts, addons, active: true, soldOut: false }] }));
       } else {
         cfg.menu = cfg.menu.map(c => c.id !== editItem.catId ? c : Object.assign({}, c, { items: c.items.map(i => i.id !== editItem.id ? i : Object.assign({}, i, { name, price, opts, addons })) }));
       }
-      editItem = null; saveMenu(cfg.menu); renderAdmin();
+      return true;
+    }
+
+    // ---------- 自動儲存：品名與價格都填好後，停止輸入約 1.2 秒就寫入雲端 ----------
+    let autoSaveTimer = null;
+    function setAutoStatus(s) {
+      autoSaveStatus = s;
+      const el = document.getElementById('item-autosave');
+      if (el) el.textContent = s === 'saving' ? '儲存中…' : s === 'saved' ? '✓ 已自動儲存' : '';
+    }
+    function scheduleAutoSave() {
+      captureItemModal(); // 先把輸入值收進 editItem，避免中途重繪遺失
+      if (autoSaveTimer) clearTimeout(autoSaveTimer);
+      autoSaveTimer = setTimeout(autoSaveItem, 1200);
+    }
+    function autoSaveItem() {
+      autoSaveTimer = null;
+      if (!editItem) return;
+      if (!isConfigLoaded()) return; // 雲端還沒載入完成，一律不寫入
+      if (!applyItemToMenu()) return; // 必填欄位還沒填完，安靜等待
+      editItem.autoSaved = true;
+      setAutoStatus('saving');
+      Promise.resolve(saveMenu(cfg.menu))
+        .then(() => setAutoStatus('saved'))
+        .catch(() => setAutoStatus(''));
+    }
+
+    function saveItem() {
+      if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null; }
+      if (!applyItemToMenu()) { showMessage('請填寫品名與價格'); return; }
+      editItem = null; autoSaveStatus = ''; saveMenu(cfg.menu); renderAdmin();
     }
 
     // ---------- 營運資料操作 ----------
