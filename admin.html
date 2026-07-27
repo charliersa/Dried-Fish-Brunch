@@ -405,12 +405,27 @@
     let reportPeriod = 'day'; // 報表期間：day | week | month
     let annDraft = { text: '', type: 'info' }; // 公告新增表單的暫存（重繪時不會被清掉）
     let annEdit = null;        // 正在編輯的公告 { id, text, type }
+    let addonList = [];        // 附加商品清單（Firestore config/addons 的 list 欄位）
+    let addonLoaded = false;   // 雲端附加商品是否載入完成（沒載完不寫入，避免蓋掉既有資料）
+    let addonSeeded = false;   // 目前畫面上的是「程式預設種子」而非雲端資料
+    let addonEdit = null;      // 正在編輯的附加商品 { idx, id, name, img, active, options:[{id,label,price,orig}], isNew }
 
     const ADMIN_TABS = [
       { k: 'revenue', label: '營收管理' }, { k: 'ops', label: '營運管理' }, { k: 'cost', label: '成本管理' },
       { k: 'payroll', label: '薪資管理' }, { k: 'ing', label: '食材管理' }, { k: 'equip', label: '設備管理' },
-      { k: 'menu', label: '菜單管理' }, { k: 'history', label: '歷史訂單' },
+      { k: 'menu', label: '菜單管理' }, { k: 'addons', label: '附加商品' }, { k: 'history', label: '歷史訂單' },
       { k: 'feedback', label: '顧客回饋' }, { k: 'announce', label: '公告管理' },
+    ];
+
+    // 附加商品預設種子：雲端 config/addons 還沒有文件時，後台先顯示這些
+    // （要跟顧客點餐頁 dried-fish-brunch-order-app/index.html 的 DEFAULT_ADDONS 一致）
+    const DEFAULT_ADDONS = [
+      { id: 'addon-milktea', name: '鮮乳',
+        img: 'https://res.cloudinary.com/dbiirpmpy/image/upload/v1785163481/fish-brunch/Fresh_milk_tea.png',
+        options: [{ id: 'bottle900', label: '900ml罐', price: 85, orig: 105 }] },
+      { id: 'addon-radishcake', name: '手作蘿蔔糕',
+        img: 'https://res.cloudinary.com/dbiirpmpy/image/upload/v1784949177/fish-brunch/Radish_cake_512.png',
+        options: [{ id: 'whole', label: '1條', price: 230 }] },
     ];
 
     const money = n => '$' + (n || 0).toLocaleString();
@@ -895,6 +910,61 @@
       }).join('');
     }
 
+    // ---------- 附加商品（顧客手機點餐頁的「🧋 附加商品」區）----------
+    const addonPriceText = op => '$' + op.price + (op.orig ? `<span style="color:#9db4bf;font-weight:400;text-decoration:line-through;margin-left:4px;">$${op.orig}</span>` : '');
+    const addonThumb = (img, size) => img
+      ? `<img src="${escapeHtml(img)}" alt="" loading="lazy" style="width:${size}px;height:${size}px;border-radius:12px;object-fit:cover;background:var(--pink-bg);flex:none;">`
+      : `<div style="width:${size}px;height:${size}px;border-radius:12px;background:var(--pink-bg);display:flex;align-items:center;justify-content:center;font-size:${Math.round(size / 2)}px;flex:none;">🍽️</div>`;
+
+    function tabAddons() {
+      const head = `
+        <div class="admin-card" style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+          <div style="min-width:0;">
+            <h3 style="margin:0;">🧋 附加商品 ${addonLoaded
+              ? (addonSeeded
+                  ? '<span class="badge" style="background:#fcf1dc;color:#e89a2b;">預設商品（雲端尚無資料）</span>'
+                  : `<span class="badge" style="background:#e4f4ec;color:#3fa877;">顧客看得到 ${addonList.filter(a => a.active !== false).length} 項</span>`)
+              : '<span class="badge" style="background:#e3f1fb;color:#3e9bd1;">雲端載入中…</span>'}</h3>
+            <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;line-height:1.6;">
+              顯示在顧客手機點餐頁最上方的「🧋 附加商品」區，可跟餐點放同一張訂單送出。<br>
+              圖片請填圖片網址（例：Cloudinary 上傳後的連結），留空會顯示 🍽️ 圖示。${addonSeeded ? '<br><b style="color:#e89a2b;">目前顯示的是程式預設商品；只要新增或編輯任何一項存檔，之後就完全以這裡的設定為準。</b>' : ''}
+            </div>
+          </div>
+          <button class="add-btn" data-action="ao-add" style="flex:none;">＋ 新增附加商品</button>
+        </div>`;
+
+      if (!addonList.length) {
+        return head + `<div class="admin-card" style="color:#9db4bf;padding:14px 0;">目前沒有附加商品，顧客點餐頁不會出現這一區。按右上「＋ 新增附加商品」建立第一項（例：鮮乳 · 900ml罐 $85）。</div>`;
+      }
+
+      const rows = addonList.map((a, i) => {
+        const off = a.active === false;
+        const opts = Array.isArray(a.options) ? a.options : [];
+        const optText = opts.length
+          ? opts.map(op => `<span style="display:inline-block;margin-right:10px;">${escapeHtml(op.label || '規格')} <b style="color:var(--pink);">${addonPriceText(op)}</b></span>`).join('')
+          : '<span style="color:#e5534b;">尚未設定規格與金額</span>';
+        return `
+          <div class="ent-row" style="opacity:${off ? .5 : 1};align-items:center;">
+            <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+              ${addonThumb(a.img, 46)}
+              <div style="min-width:0;">
+                <div style="font-weight:700;">${escapeHtml(a.name || '(未命名)')}${off ? ' <span class="badge" style="background:#eef3f6;color:#7c93a0;">已下架</span>' : ''}</div>
+                <div style="font-size:12px;color:var(--ink-soft);margin-top:3px;">${optText}</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+              <button class="mini-btn" data-action="ao-up" data-idx="${i}"${i === 0 ? ' disabled style="opacity:.35;"' : ''}>↑</button>
+              <button class="mini-btn" data-action="ao-down" data-idx="${i}"${i === addonList.length - 1 ? ' disabled style="opacity:.35;"' : ''}>↓</button>
+              <button class="mini-btn" data-action="ao-active" data-idx="${i}">${off ? '上架' : '下架'}</button>
+              <button class="mini-btn" data-action="ao-edit" data-idx="${i}">編輯</button>
+              <button class="mini-btn" data-action="ao-del" data-idx="${i}">🗑</button>
+            </div>
+          </div>`;
+      }).join('');
+
+      return head + `<div class="admin-card">${rows}</div>`;
+    }
+
     function tabHistory() {
       const today = orders.filter(o => isToday(o.createdAt));
       const pool = histScope === 'today' ? today : orders;
@@ -1197,6 +1267,39 @@
             </div>
           </div></div>`;
       }
+      if (addonEdit) {
+        const inputStyle = 'text-align:left;letter-spacing:normal;margin:0;box-sizing:border-box;';
+        const opts = addonEdit.options || [];
+        html += `
+          <div class="pin-overlay"><div class="pin-box" style="max-width:380px;">
+            <h3 style="font-size:17px;font-weight:900;margin:0 0 14px;">${addonEdit.isNew ? '新增附加商品' : '編輯附加商品'}</h3>
+            <input id="ao-name" placeholder="商品名稱（例：鮮乳）" value="${escapeHtml(addonEdit.name || '')}" style="${inputStyle}margin-bottom:8px;" />
+            <input id="ao-img" placeholder="圖片網址（https://…，可留空）" value="${escapeHtml(addonEdit.img || '')}" style="${inputStyle}" />
+            <div style="display:flex;align-items:center;gap:10px;margin-top:10px;text-align:left;">
+              ${addonThumb(addonEdit.img, 56)}
+              <div style="font-size:12px;color:var(--ink-soft);line-height:1.6;">左邊是顧客會看到的圖片。<br>改完網址按一次「更新預覽」。</div>
+              <button class="mini-btn" data-action="ao-preview" style="flex:none;">更新預覽</button>
+            </div>
+            <div style="margin-top:14px;text-align:left;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+                <div style="font-size:12px;color:var(--ink-soft);font-weight:700;">📦 規格與售價（至少一組；兩組以上顧客可切換）</div>
+                <button class="mini-btn" data-action="ao-opt-add" style="flex:none;">＋ 新增</button>
+              </div>
+              ${opts.length ? opts.map((op, i) => `
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+                <input id="ao-opt-label-${i}" placeholder="規格（例：900ml罐）" value="${escapeHtml(op.label || '')}" style="${inputStyle}flex:1;width:auto;" />
+                <input id="ao-opt-price-${i}" type="number" placeholder="售價" value="${op.price != null ? escapeHtml(String(op.price)) : ''}" style="${inputStyle}width:72px;flex:none;" />
+                <input id="ao-opt-orig-${i}" type="number" placeholder="原價" value="${op.orig != null ? escapeHtml(String(op.orig)) : ''}" style="${inputStyle}width:72px;flex:none;" />
+                <button class="mini-btn" data-action="ao-opt-del" data-idx="${i}" style="flex:none;">🗑</button>
+              </div>`).join('') : '<div style="font-size:12px;color:#9db4bf;padding:2px 0 4px;">尚無規格，按右上「＋ 新增」加入。</div>'}
+              <div style="font-size:12px;color:var(--ink-soft);">「原價」可留空；有填會在顧客端顯示刪除線特價。</div>
+            </div>
+            <div class="pin-actions">
+              <button class="pill-button" style="flex:1;" data-action="ao-cancel">取消</button>
+              <button data-action="ao-save" style="flex:1;border:none;background:var(--pink);color:#fff;font-weight:900;padding:11px;border-radius:12px;">儲存</button>
+            </div>
+          </div></div>`;
+      }
       return html;
     }
 
@@ -1211,7 +1314,7 @@
       const _act = document.activeElement;
       const _focusId = _act && _act.id ? _act.id : null;
       const _caret = _act && typeof _act.selectionStart === 'number' ? _act.selectionStart : null;
-      const bodyFns = { revenue: tabRevenue, ops: tabOps, cost: tabCost, payroll: tabPayroll, ing: tabIng, equip: tabEquip, menu: tabMenu, history: tabHistory, feedback: tabFeedback, announce: tabAnnounce };
+      const bodyFns = { revenue: tabRevenue, ops: tabOps, cost: tabCost, payroll: tabPayroll, ing: tabIng, equip: tabEquip, menu: tabMenu, addons: tabAddons, history: tabHistory, feedback: tabFeedback, announce: tabAnnounce };
       app.innerHTML = `
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
           <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);">📊 ${syncModeLabel()} · 自動更新</div>
@@ -1298,6 +1401,8 @@
       // → 公告（也是寫進 config）
       'ann-add', 'ann-del', 'ann-toggle', 'ann-up', 'ann-down', 'ann-save',
     ];
+    // 附加商品寫入 config/addons 的動作（跟 cfg 無關，另外用 addonLoaded 把關）
+    const AO_WRITE_ACTIONS = ['ao-save', 'ao-del', 'ao-active', 'ao-up', 'ao-down'];
 
     function handleAction(b) {
       const a = b.dataset.action;
@@ -1306,8 +1411,15 @@
         showMessage('⚠️ 雲端資料尚未載入完成，請稍候再操作（避免覆蓋既有資料）');
         return;
       }
+      // 附加商品寫入雲端前，也要等雲端載入完成（否則會用空清單蓋掉既有商品）
+      if (AO_WRITE_ACTIONS.indexOf(a) !== -1 && !addonLoaded) {
+        showMessage('⚠️ 雲端資料尚未載入完成，請稍候再操作（避免覆蓋既有資料）');
+        return;
+      }
       // 公告的任何動作都會重繪，先把輸入框裡打到一半的字收起來
       if (a.indexOf('ann-') === 0) captureAnnInputs();
+      // 附加商品彈窗的任何動作都會重繪，先把打到一半的字收回暫存
+      if (a.indexOf('ao-') === 0) captureAddonModal();
       if (a === 'hist-today') { histScope = 'today'; renderAdmin(); }
       else if (a === 'hist-all') { histScope = 'all'; renderAdmin(); }
       else if (a === 'hist-del') { if (confirm('確定刪除這筆訂單？此動作無法復原，且會從雲端同步移除。')) syncDeleteOrder(id); }
@@ -1355,6 +1467,107 @@
       else if (a === 'ann-del') { if (confirm('確定刪除這則公告？此動作無法復原。')) { commitAnn(annList().filter(x => x.id !== id)); renderAdmin(); showMessage('已刪除公告'); } }
       else if (a === 'ann-up') { moveAnnouncement(id, -1); }
       else if (a === 'ann-down') { moveAnnouncement(id, 1); }
+      else if (a === 'ao-add') { addonEdit = { isNew: true, name: '', img: '', active: true, options: [{ label: '', price: '', orig: '' }] }; renderAdmin(); }
+      else if (a === 'ao-edit') { openAddonEdit(parseInt(b.dataset.idx, 10)); }
+      else if (a === 'ao-preview') { renderAdmin(); }
+      else if (a === 'ao-opt-add') { addonEdit.options = [...(addonEdit.options || []), { label: '', price: '', orig: '' }]; renderAdmin(); }
+      else if (a === 'ao-opt-del') { const ix = parseInt(b.dataset.idx, 10); addonEdit.options = (addonEdit.options || []).filter((_, i) => i !== ix); renderAdmin(); }
+      else if (a === 'ao-cancel') { addonEdit = null; renderAdmin(); }
+      else if (a === 'ao-save') { saveAddonEdit(); }
+      else if (a === 'ao-active') { toggleAddon(parseInt(b.dataset.idx, 10)); }
+      else if (a === 'ao-del') { deleteAddon(parseInt(b.dataset.idx, 10)); }
+      else if (a === 'ao-up') { moveAddon(parseInt(b.dataset.idx, 10), -1); }
+      else if (a === 'ao-down') { moveAddon(parseInt(b.dataset.idx, 10), 1); }
+    }
+
+    // ---------- 附加商品操作 ----------
+    // 重繪會重建 innerHTML，先把輸入框現值收回暫存，打到一半的字才不會不見
+    function captureAddonModal() {
+      if (!addonEdit) return;
+      const n = document.getElementById('ao-name');
+      if (n) addonEdit.name = n.value;
+      const g = document.getElementById('ao-img');
+      if (g) addonEdit.img = g.value;
+      (addonEdit.options || []).forEach((op, i) => {
+        const l = document.getElementById('ao-opt-label-' + i);
+        const p = document.getElementById('ao-opt-price-' + i);
+        const o = document.getElementById('ao-opt-orig-' + i);
+        if (l) op.label = l.value;
+        if (p) op.price = p.value;
+        if (o) op.orig = o.value;
+      });
+    }
+
+    function openAddonEdit(idx) {
+      const a = addonList[idx];
+      if (!a) return;
+      addonEdit = {
+        isNew: false, idx, id: a.id, name: a.name || '', img: a.img || '', active: a.active !== false,
+        options: (Array.isArray(a.options) ? a.options : []).map(op => ({
+          id: op.id, label: op.label || '', price: op.price != null ? op.price : '', orig: op.orig != null ? op.orig : '',
+        })),
+      };
+      renderAdmin();
+    }
+
+    function saveAddonEdit() {
+      if (!addonEdit) return;
+      const name = (addonEdit.name || '').trim();
+      const options = (addonEdit.options || []).map((op, i) => {
+        const price = parseInt(op.price, 10);
+        const orig = parseInt(op.orig, 10);
+        const rec = { id: op.id || ('o' + Date.now().toString(36) + i), label: (op.label || '').trim(), price };
+        if (!isNaN(orig) && orig > 0) rec.orig = orig;
+        return rec;
+      }).filter(op => !isNaN(op.price) && op.price >= 0);
+      if (!name) { showMessage('請填寫商品名稱'); return; }
+      if (!options.length) { showMessage('請至少填一組規格的售價'); return; }
+      const rec = {
+        id: addonEdit.id || ('addon-' + Date.now().toString(36)),
+        name, img: (addonEdit.img || '').trim(), active: addonEdit.active !== false, options,
+      };
+      const isNew = !!addonEdit.isNew;
+      const list = isNew ? addonList.concat([rec]) : addonList.map((x, i) => i === addonEdit.idx ? rec : x);
+      addonEdit = null;
+      commitAddons(list, isNew ? '✅ 已新增，顧客點餐頁馬上看得到' : '✅ 已儲存，顧客點餐頁馬上更新');
+    }
+
+    function toggleAddon(idx) {
+      const a = addonList[idx];
+      if (!a) return;
+      commitAddons(addonList.map((x, i) => i !== idx ? x : Object.assign({}, x, { active: x.active === false })),
+        a.active === false ? '已上架，顧客看得到了' : '已下架，顧客暫時看不到');
+    }
+
+    function deleteAddon(idx) {
+      const a = addonList[idx];
+      if (!a) return;
+      if (!confirm('確定刪除附加商品「' + (a.name || '') + '」？\n刪除後顧客點餐頁就不會再出現，此動作無法復原。')) return;
+      commitAddons(addonList.filter((_, i) => i !== idx), '已刪除');
+    }
+
+    function moveAddon(idx, dir) {
+      const list = addonList.slice();
+      const j = idx + dir;
+      if (idx < 0 || j < 0 || j >= list.length) return;
+      const tmp = list[idx]; list[idx] = list[j]; list[j] = tmp;
+      commitAddons(list, '');
+    }
+
+    // 整份寫回雲端 config/addons（跟菜單一樣先更新本機鏡像，快照回來會再校正一次）
+    function commitAddons(list, msg) {
+      addonList = list;
+      addonSeeded = false; // 一旦存過，就完全以後台設定為準
+      const db = ensureDb();
+      if (db) {
+        db.collection('config').doc('addons').set({ list, updatedAt: Date.now() })
+          .then(() => { if (msg) showMessage(msg); })
+          .catch(e => { console.warn('附加商品儲存失敗', e); showMessage('⚠️ 雲端儲存失敗，請檢查網路或 Firestore 規則是否允許寫入 config/addons'); });
+      } else {
+        try { localStorage.setItem('xyg-addons', JSON.stringify(list)); } catch (e) {}
+        showMessage('⚠️ 目前離線，已暫存本機；連上網後請再存一次');
+      }
+      renderAdmin();
     }
 
     // ---------- 公告操作 ----------
@@ -1625,13 +1838,46 @@
 
     initSync(list => {
       orders = list;
-      if (unlocked && !editItem && !editEnt) renderAdmin();
+      if (unlocked && !editItem && !editEnt && !addonEdit) renderAdmin();
     });
 
     initConfig(c => {
       cfg = c;
-      if (unlocked && !editItem && !editEnt) renderAdmin();
+      if (unlocked && !editItem && !editEnt && !addonEdit) renderAdmin();
     });
+
+    // ---------- 附加商品同步（Firestore config/addons，離線退回本機）----------
+    (function initAddonSync() {
+      const db = ensureDb();
+      if (!db) {
+        try { addonList = JSON.parse(localStorage.getItem('xyg-addons') || '[]'); } catch (e) {}
+        if (!addonList.length) { addonList = JSON.parse(JSON.stringify(DEFAULT_ADDONS)); addonSeeded = true; }
+        addonLoaded = true;
+        return;
+      }
+      db.collection('config').doc('addons').onSnapshot(
+        snap => {
+          const data = snap.exists ? snap.data() : null;
+          if (data && Array.isArray(data.list)) {
+            // 雲端已有文件 → 完全以雲端為準（就算清空也是店家自己刪的）
+            addonList = data.list;
+            addonSeeded = false;
+          } else {
+            // 雲端還沒建過這份文件 → 先顯示跟顧客端一致的預設商品，讓店家能直接編輯
+            addonList = JSON.parse(JSON.stringify(DEFAULT_ADDONS));
+            addonSeeded = true;
+          }
+          addonLoaded = true;
+          if (unlocked && aTab === 'addons' && !editItem && !editEnt && !addonEdit) renderAdmin();
+        },
+        err => {
+          console.warn('附加商品同步中斷', err);
+          if (!addonList.length) { addonList = JSON.parse(JSON.stringify(DEFAULT_ADDONS)); addonSeeded = true; }
+          addonLoaded = true;
+          if (unlocked && aTab === 'addons') renderAdmin();
+        }
+      );
+    })();
 
     // ---------- 顧客回饋同步（Firestore feedback 集合，離線退回本機）----------
     (function initFeedbackSync() {
