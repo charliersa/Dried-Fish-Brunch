@@ -280,8 +280,11 @@
       <div class="nav-pills">
         <a href="customer.html" style="background:#fff;color:var(--ink);">🍽️ 顧客點餐</a>
         <a href="kitchen.html">👨‍🍳 廚房後台</a>
-        <a href="cashier.html">💰 外場收銀</a>
+        <!-- 外場收銀先隱藏（cashier.html 仍在，要復原就把這行還原）
+        <a href="cashier.html">💰 外場收銀</a> -->
         <a href="display.html">📺 叫號螢幕</a>
+        <!-- 店家公告：沒有公告時自動隱藏；按下開啟懸浮公告視窗 -->
+        <button type="button" id="ann-pill" style="display:none;">📢 店家公告</button>
         <a href="admin.html">🔒 管理後台</a>
       </div>
     </header>
@@ -292,6 +295,9 @@
     <span id="cart-info"></span>
     <span style="font-weight:900;">前往結帳 →</span>
   </div>
+
+  <!-- 懸浮公告視窗掛載點 -->
+  <div id="ann-modal"></div>
 
   <div id="toast" class="toast"></div>
 
@@ -596,7 +602,7 @@
             <div style="display:flex;align-items:center;gap:4px;margin:18px 4px 8px;flex-wrap:wrap;justify-content:center;">${stepHtml}</div>
             <div style="font-size:13px;margin-top:6px;${isReady ? 'color:#fff;font-weight:800;' : 'color:var(--ink-soft);'}">${isReady ? '🍽️ 餐點好囉！請到櫃台取餐' : '畫面會自動更新，請留意叫號'}</div>
           </div>
-          ${!isReady ? '<div style="background:#fff8e6;border:1.5px solid #f0b64b;border-radius:14px;padding:12px 14px;margin-top:12px;text-align:center;color:#a86a12;font-weight:800;font-size:14px;">📱 請保持此畫面開啟、螢幕先別鎖<br><span style="font-weight:500;font-size:13px;color:#b07a1e;">餐點好了會在這裡自動跳出「可取餐」並響鈴 🔔</span></div>' : ''}
+          ${!isReady ? renderPickupNotice(order) : ''}
           <div style="background:#fff;border-radius:18px;padding:16px;margin-top:14px;box-shadow:0 2px 6px rgba(28,94,122,.07);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
               <span style="font-weight:700;">${order.type} · ${escapeHtml(order.table)}${order.phone ? ` · 📞 ${escapeHtml(order.phone)}` : ''}</span>
@@ -733,6 +739,15 @@
         renderCustomer();
       } else if (action === 'submit-order') {
         submitOrder();
+      } else if (action === 'enable-push') {
+        // 顧客在確認訂單頁補開通知；要在點擊手勢裡呼叫，瀏覽器才會跳權限視窗
+        const o = orders.find(x => x.id === state.currentOrderId);
+        if (!o) return;
+        ensureOrderPush(o).then(() => {
+          renderCustomer(); // 依最新授權狀態換掉說明區塊
+          if (Notification.permission === 'granted') showMessage('🔔 已開啟，餐點好了會通知你');
+          else if (Notification.permission === 'denied') showMessage('通知被封鎖了，請到瀏覽器設定開啟');
+        });
       } else if (action === 'new-order') {
         state.currentOrderId = null;
         state.cart = [];
@@ -882,6 +897,7 @@
       if (state.currentOrderId) renderCustomer();
     }, { today: true });
     initConfig(() => {
+      syncAnnouncementUI(); // 公告按鈕在標題列，跟點餐畫面分開更新
       if (!state.currentOrderId) renderCustomer();
     });
 
