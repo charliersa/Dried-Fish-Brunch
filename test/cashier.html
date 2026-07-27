@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#1c5e7a" />
+  <link rel="manifest" href="manifest.json" />
+  <title>外場收銀 - 小魚乾線上點餐系統</title>
+  <style>
+    /* 共用樣式由 shared.js 於頁尾注入 */
+    .summary-card {
+      background: #fff;
+      border-radius: 18px;
+      padding: 16px;
+      margin-top: 14px;
+    }
+
+    .summary-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-weight: 900;
+      border-top: 1px solid var(--line);
+      margin-top: 8px;
+      padding-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="top-row">
+        <div class="brand">
+          <div class="brand-logo">🐟</div>
+          <div class="brand-text">
+            <h1>小魚乾早午餐</h1>
+            <p>DRIED FISH BRUNCH</p>
+          </div>
+        </div>
+        <div class="info-chip">⏰ 6:00–12:00</div>
+      </div>
+      <div class="address">📍 台南市東區長東街 106 號 · 現點現做，請耐心等候</div>
+      <div class="nav-pills">
+        <a href="customer.html">🍽️ 顧客點餐</a>
+        <a href="kitchen.html">👨‍🍳 廚房後台</a>
+        <a href="cashier.html" style="background:#fff;color:var(--ink);">💰 外場收銀</a>
+        <a href="display.html">📺 叫號螢幕</a>
+        <a href="admin.html">🔒 管理後台</a>
+      </div>
+    </header>
+    <main id="app"></main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="neworder-sound.js"></script>
+  <script src="shared.js"></script>
+  <script>document.head.insertAdjacentHTML('beforeend', '<style>' + getSharedStyles() + '</style>');</script>
+  <script>
+    applyDeviceCodeFromUrl();
+    const app = document.getElementById('app');
+    let orders = loadOrders();
+
+    function renderCashier() {
+      const todayOrders = orders.filter(order => isToday(order.createdAt) && !order.rejected);
+      const isPaid = o => !!(o.pay && o.pay.paid);
+      const paid = todayOrders.filter(isPaid);
+      const unpaid = todayOrders.filter(o => !isPaid(o));
+
+      const totalRevenue = paid.reduce((sum, order) => sum + (order.total || 0), 0);
+      const totalPending = unpaid.reduce((sum, order) => sum + (order.total || 0), 0);
+
+      const cardsHtml = unpaid.length === 0 ?
+        '<div class="stat-card" style="grid-column:1/-1;">目前沒有待結帳的訂單。已完成的訂單已移至管理後台「歷史訂單」。</div>' :
+        `<div class="order-grid">${unpaid.map(order => renderCashierCard(order)).join('')}</div>`;
+
+      app.innerHTML = `
+        <div class="stats-grid">
+          ${renderStat('今日訂單', todayOrders.length)}
+          ${renderStat('未結帳', unpaid.length, 'var(--amber)')}
+          ${renderStat('已結帳', paid.length, 'var(--green)')}
+          ${renderStat('應收金額', '$' + totalPending, 'var(--pink)')}
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+          <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);">
+            💰 營收統計
+            <button class="pill-button" data-action="set-device" style="cursor:pointer;font-size:12px;padding:4px 10px;">📟 本機代碼：${getDeviceCode()}</button>
+            <button class="pill-button" data-action="toggle-sound" style="cursor:pointer;font-size:12px;padding:4px 10px;">${soundEnabled ? '🔔 提示音：開' : '🔕 提示音：關'}</button>
+            ${(soundEnabled && !_audioReady) ? `<button class="pill-button" data-action="enable-sound" style="cursor:pointer;font-size:12px;padding:4px 10px;border-color:#e05252;color:#e05252;font-weight:900;">⚠️ 提示音未啟用 — 點我測試</button>` : ''}
+            <button class="pill-button" data-action="enable-push" style="cursor:pointer;font-size:12px;padding:4px 10px;${_pushState === 'granted' ? 'border-color:#3fa877;color:#3fa877;' : 'border-color:#e89a2b;color:#e89a2b;'}">${_pushState === 'granted' ? '✅ 關店通知：開' : '🔔 開啟關店通知'}</button>
+          </div>
+          <div>總營收: <span style="font-weight:900;color:var(--green);">$${totalRevenue}</span></div>
+        </div>
+        ${cardsHtml}
+      `;
+
+      attachEvents();
+    }
+
+    function renderStat(label, value, color) {
+      return `
+        <div class="stat-card">
+          <div style="font-size:24px;font-weight:900;color:${color || 'var(--ink)'};">${value}</div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">${label}</div>
+        </div>
+      `;
+    }
+
+    function renderCashierCard(order) {
+      const statusMap = {
+        new: { label: '新訂單', color: 'var(--amber)' },
+        cook: { label: '製作中', color: 'var(--blue)' },
+        done: { label: '已完成', color: 'var(--green)' },
+      };
+      const status = statusMap[order.status];
+
+      const itemsHtml = order.items.map(item => {
+        const mi = getItem(item.id);
+        const nm = item.name || (mi && mi.name) || '未知品項';
+        const price = (item.price != null ? item.price : (mi ? mi.price : 0));
+        return `
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;font-size:13px;padding:2px 0;">
+          <span>${nm}${item.temp ? `（${item.temp}）` : ''} ×${item.qty}${item.note ? `<span style="color:var(--amber);"> · 📝${escapeHtml(item.note)}</span>` : ''}</span>
+          <span style="white-space:nowrap;">$${price * item.qty}</span>
+        </div>
+      `; }).join('');
+
+      return `
+        <div class="order-card" style="border-top-color:${status.color};">
+          <div class="order-head">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span style="font-size:20px;font-weight:900;color:var(--pink);">${order.no}</span>
+              <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:${status.color.replace('var(', 'rgba(').replace(')', ',.15)')};color:${status.color};">${status.label}</span>
+            </div>
+            <span style="font-size:11px;color:var(--ink-soft);">${new Date(order.createdAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+          </div>
+          <div class="order-meta">
+            <span>${order.type}</span>
+            <span>·</span>
+            <span>${escapeHtml(order.table)}</span>
+            ${order.phone ? `<span>·</span><span>📞 ${escapeHtml(order.phone)}</span>` : ''}
+          </div>
+          <div class="order-items">
+            ${itemsHtml}
+            ${order.note ? `<div class="order-note">📝 ${escapeHtml(order.note)}</div>` : ''}
+          </div>
+          <div class="order-footer">
+            <span style="font-weight:900;color:var(--pink);">$${order.total}</span>
+            ${(order.pay && order.pay.paid)
+              ? `<span style="font-weight:700;color:var(--green);">${order.pay.method === 'cash' ? '💵 已收現金' : '📱 已收行動'}</span>`
+              : `<div style="display:flex;gap:6px;">
+                   <button class="pill-button" style="border-color:var(--green);color:var(--green);" data-action="pay-cash" data-id="${order.id}">💵 現金</button>
+                   <button class="pill-button" style="border-color:var(--blue);color:var(--blue);" data-action="pay-mobile" data-id="${order.id}">📱 行動</button>
+                 </div>`
+            }
+          </div>
+        </div>
+      `;
+    }
+
+    function attachEvents() {
+      app.querySelectorAll('[data-action]').forEach(btn => btn.addEventListener('click', handleAction));
+    }
+
+    function handleAction(event) {
+      const btn = event.currentTarget;
+      const action = btn.dataset.action;
+      if (!action) return;
+
+      if (action === 'set-device') {
+        const c = prompt('設定本機代碼（會顯示在取餐號前，建議每台不同，例：A、B）', getDeviceCode());
+        if (c) { setDeviceCode(c); renderCashier(); }
+        return;
+      }
+      if (action === 'enable-sound') {
+        _unlockAudio();
+        playNewOrderSound(); // 試響一聲，確認可以出聲
+        return;
+      }
+      if (action === 'toggle-sound') {
+        toggleSound();
+        return;
+      }
+      if (action === 'enable-push') {
+        registerBackendPush(true);
+        return;
+      }
+      if (action === 'pay-cash' || action === 'pay-mobile') {
+        const id = btn.dataset.id;
+        const method = action === 'pay-cash' ? 'cash' : 'mobile';
+        const order = orders.find(o => o.id === id);
+        if (order && !(order.pay && order.pay.paid)) {
+          order.pay = { method, paid: true }; // 樂觀更新（只改付款，不動製作狀態）
+          renderCashier();
+          syncUpdateOrder(id, { pay: { method, paid: true }, updatedAt: Date.now() });
+        }
+      }
+    }
+
+    // ===== 新訂單提示音（Web Audio，免外部音檔）=====
+    let _audioCtx = null;
+    function _getAudioCtx() {
+      if (_audioCtx) return _audioCtx;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      _audioCtx = new AC();
+      return _audioCtx;
+    }
+    // 提示音音檔（HTMLAudio，相容性最高）；使用者互動一次即解鎖，之後可自動播放
+    const _alertAudio = new Audio(window.ALERT_SOUND_URI || '');
+    _alertAudio.preload = 'auto';
+    let _bpDone = false;
+    let _pushState = (typeof Notification !== 'undefined') ? Notification.permission : 'unsupported'; // granted/denied/default/unsupported
+    // 音訊是否真的已解鎖（瀏覽器自動播放封鎖）；沒解鎖的話新訂單不會有聲音
+    let _audioReady = false;
+    function _markAudioReady(v) {
+      if (_audioReady === v) return;
+      _audioReady = v;
+      try { renderCashier(); } catch (e) {}
+    }
+    function _unlockAudio() {
+      const ctx = _getAudioCtx();
+      if (ctx && ctx.state === 'suspended') {
+        const r = ctx.resume();
+        if (r && r.then) r.then(() => { if (ctx.state === 'running') _markAudioReady(true); }).catch(() => {});
+      }
+      try {
+        _alertAudio.volume = 0;
+        const p = _alertAudio.play();
+        if (p && p.then) p.then(() => {
+          _alertAudio.pause(); _alertAudio.currentTime = 0; _alertAudio.volume = 1;
+          _markAudioReady(true); // 真的播得出來才算解鎖
+        }).catch(() => { _alertAudio.volume = 1; });
+      } catch (e) { _alertAudio.volume = 1; }
+      if (!_bpDone) { _bpDone = true; registerBackendPush(); } // 首次互動時註冊後端推播（關網頁也收得到新單）
+    }
+    document.addEventListener('touchend', _unlockAudio, { passive: true });
+    document.addEventListener('click', _unlockAudio, { passive: true });
+    // 註冊本裝置為「後端推播接收者」：授權通知→取得 token→存進 backendTokens
+    // interactive=true（手動點按鈕）或首次授權成功時，會跳確認視窗
+    async function registerBackendPush(interactive) {
+      try {
+        if (!('Notification' in window) || !('serviceWorker' in navigator)) { if (interactive) alert('此裝置或瀏覽器不支援通知'); return; }
+        if (typeof firebase === 'undefined' || typeof firebase.messaging !== 'function') return;
+        if (typeof PUSH_CONFIG === 'undefined' || !PUSH_CONFIG.vapidKey || PUSH_CONFIG.vapidKey.indexOf('PASTE') !== -1) return;
+        const before = Notification.permission;
+        let perm = before;
+        if (perm === 'default') perm = await Notification.requestPermission();
+        _pushState = perm; renderCashier();
+        if (perm !== 'granted') { if (interactive) alert('⚠️ 尚未允許通知，關店時不會收到推播。\n可到 iPad「設定 → 通知」開啟本 App 的通知。'); return; }
+        const reg = await navigator.serviceWorker.register('firebase-messaging-sw.js', { scope: './fcm-scope/' });
+        const token = await firebase.messaging().getToken({ vapidKey: PUSH_CONFIG.vapidKey, serviceWorkerRegistration: reg });
+        if (!token) { if (interactive) alert('取得推播失敗，請重試'); return; }
+        let bid;
+        try { bid = localStorage.getItem('xyg-backend-id'); if (!bid) { bid = 'bk' + Date.now() + Math.floor(Math.random() * 1000); localStorage.setItem('xyg-backend-id', bid); } } catch (e) { bid = token.slice(-24); }
+        await firebase.firestore().collection('backendTokens').doc(bid).set({ token, updatedAt: Date.now() });
+        _pushState = 'granted'; renderCashier();
+        if (before !== 'granted' || interactive) alert('✅ 關店通知已開啟！\n顧客下單時，即使這台網頁關著也會跳通知＋響。');
+      } catch (e) { if (interactive) alert('設定失敗：' + ((e && e.message) || e)); console.warn('後端推播註冊略過', e); }
+    }
+    // 提示音開關（預設開，記在 localStorage）
+    let soundEnabled = true;
+    try { soundEnabled = localStorage.getItem('xyg-cashier-sound') !== 'off'; } catch (e) {}
+    function toggleSound() {
+      soundEnabled = !soundEnabled;
+      try { localStorage.setItem('xyg-cashier-sound', soundEnabled ? 'on' : 'off'); } catch (e) {}
+      if (soundEnabled) { _unlockAudio(); playNewOrderSound(); }
+      renderCashier();
+    }
+    // 主要用音檔播放（相容性最高，平板也能響）；失敗才退回 Web Audio 合成
+    function playNewOrderSound() {
+      let ok = false;
+      try {
+        if (window.ALERT_SOUND_URI) {
+          _alertAudio.currentTime = 0;
+          _alertAudio.volume = 1;
+          const p = _alertAudio.play();
+          if (p) {
+            if (p.then) p.then(() => _markAudioReady(true));
+            // 播不出來 → 標記未解鎖（畫面會跳出警告）並試合成音
+            if (p.catch) p.catch(() => { _markAudioReady(false); });
+          }
+          ok = true;
+        }
+      } catch (e) {}
+      if (navigator.vibrate) navigator.vibrate([120, 60, 120, 60, 200]);
+    }
+    // 偵測是否有新的「未結帳訂單」進來（首次同步不響，避免載入時把既有訂單全部當新單）
+    let _knownIds = null;
+    function checkNewOrders(list) {
+      const ids = new Set(list.map(o => o.id));
+      if (_knownIds === null) { _knownIds = ids; return; } // 第一次載入：只記錄不響
+      const hasNew = list.some(o => !_knownIds.has(o.id) && !o.rejected && !(o.pay && o.pay.paid));
+      _knownIds = ids;
+      if (hasNew && soundEnabled) playNewOrderSound();
+    }
+
+    renderCashier();
+    initSync(list => {
+      orders = list;
+      checkNewOrders(list); // 顧客結帳送單就響鈴提醒收銀
+      renderCashier();
+    }, { today: true });
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service Worker failed:', err));
+    }
+  </script>
+</body>
+</html>

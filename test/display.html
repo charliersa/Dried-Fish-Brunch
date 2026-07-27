@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#1c5e7a" />
+  <link rel="manifest" href="manifest.json" />
+  <title>叫號螢幕 - 小魚乾線上點餐系統</title>
+  <style>
+    /* 共用樣式由 shared.js 於頁尾注入 */
+    body {
+      padding-bottom: 0;
+    }
+
+    main {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 0;
+    }
+
+    .display-container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: center;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #fff;
+      overflow: hidden;
+    }
+
+    .display-header {
+      padding: 20px;
+      text-align: center;
+    }
+
+    .display-header h1 {
+      margin: 0;
+      font-size: 32px;
+      font-weight: 900;
+    }
+
+    .display-header p {
+      margin: 4px 0 0;
+      font-size: 16px;
+      opacity: .9;
+    }
+
+    .display-main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      gap: 16px;
+    }
+
+    .order-number {
+      font-size: 180px;
+      font-weight: 900;
+      letter-spacing: 20px;
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .7; }
+    }
+
+    .order-info {
+      font-size: 30px;
+      font-weight: 700;
+      opacity: .9;
+    }
+
+    .completed-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 10px;
+      padding: 20px;
+      max-width: 1200px;
+      width: 100%;
+    }
+
+    .completed-number {
+      background: rgba(255, 255, 255, .2);
+      border-radius: 12px;
+      padding: 16px;
+      font-size: 32px;
+      font-weight: 900;
+      border: 2px solid rgba(255, 255, 255, .5);
+      animation: slideIn .3s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .empty-message {
+      font-size: 36px;
+      opacity: .8;
+    }
+  </style>
+</head>
+<body>
+  <main id="display"></main>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="neworder-sound.js"></script>
+  <script src="shared.js"></script>
+  <script>document.head.insertAdjacentHTML('beforeend', '<style>' + getSharedStyles() + '</style>');</script>
+  <script>
+    const display = document.getElementById('display');
+    let orders = loadOrders();
+    let lastCompleted = null;
+
+    // 叫號提示音（全系統唯一音源 鈴聲.mp3）；瀏覽器要求先有一次互動才能出聲
+    const _alertAudio = new Audio(window.ALERT_SOUND_URI || '');
+    _alertAudio.preload = 'auto';
+    let _audioReady = false;
+    function _unlockAudio() {
+      try {
+        _alertAudio.volume = 0;
+        const p = _alertAudio.play();
+        if (p && p.then) p.then(() => {
+          _alertAudio.pause(); _alertAudio.currentTime = 0; _alertAudio.volume = 1;
+          if (!_audioReady) { _audioReady = true; renderDisplay(); }
+        }).catch(() => { _alertAudio.volume = 1; });
+      } catch (e) { _alertAudio.volume = 1; }
+    }
+    document.addEventListener('touchend', _unlockAudio, { passive: true });
+    document.addEventListener('click', _unlockAudio, { passive: true });
+
+    function renderDisplay() {
+      const today = orders.filter(o => isToday(o.createdAt) && !o.rejected);
+      const ready = today.filter(o => o.notified && !((o.pay && o.pay.paid) && o.picked)).sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt)); // 紅：可取餐（廚房按通知取餐後亮；結帳+取餐都完成才消失）
+      const preparing = today.filter(o => !o.notified && !o.picked).sort((a, b) => a.createdAt - b.createdAt); // 藍：準備中（尚未通知取餐）
+
+      // 有新號碼進入「可取餐」時嗶一聲
+      const topId = ready.length ? ready[0].id : null;
+      if (topId && lastCompleted !== topId && typeof Audio !== 'undefined') {
+        try {
+          _alertAudio.currentTime = 0;
+          _alertAudio.play().catch(() => {});
+        } catch (e) {}
+      }
+      lastCompleted = topId;
+
+      const readyHtml = ready.length
+        ? `<div style="display:flex;flex-wrap:wrap;gap:24px;justify-content:center;align-items:center;">
+             ${ready.map(o => `<div style="background:#fff;color:#e5534b;border:6px solid #e5534b;border-radius:24px;padding:14px 34px;font-size:110px;font-weight:900;line-height:1;box-shadow:0 10px 30px rgba(229,83,75,.4);animation:pulse 1.2s infinite;">${escapeHtml(o.no)}</div>`).join('')}
+           </div>`
+        : `<div class="empty-message">準備中，請稍候…</div>`;
+
+      const prepHtml = preparing.length
+        ? `<div style="padding:18px;width:100%;max-width:1200px;">
+             <div style="font-size:22px;opacity:.95;margin-bottom:10px;">🔵 準備中（製作中）</div>
+             <div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;">
+               ${preparing.map(o => `<div style="background:rgba(62,155,209,.35);border:2px solid rgba(255,255,255,.6);border-radius:14px;padding:12px 22px;font-size:32px;font-weight:900;">${escapeHtml(o.no)}</div>`).join('')}
+             </div>
+           </div>`
+        : '';
+
+      display.innerHTML = `
+        <div class="display-container">
+          <div class="display-header">
+            <h1>🐟 小魚乾早午餐</h1>
+            <p>🔴 紅色 = 已可取餐　🔵 藍色 = 準備中</p>
+          </div>
+          ${!_audioReady ? `<div style="background:#e05252;color:#fff;font-size:22px;font-weight:900;padding:12px 20px;border-radius:14px;margin:0 18px 12px;cursor:pointer;">⚠️ 叫號提示音未啟用 — 請點一下畫面</div>` : ''}
+          <div class="display-main">${readyHtml}</div>
+          ${prepHtml}
+        </div>
+      `;
+    }
+
+    renderDisplay();
+    initSync(list => {
+      orders = list;
+      renderDisplay();
+    }, { today: true });
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service Worker failed:', err));
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,2041 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#1c5e7a" />
+  <link rel="manifest" href="manifest.json" />
+  <title>管理後台 - 小魚乾線上點餐系統</title>
+  <style>
+    /* 共用樣式由 shared.js 於頁尾注入 */
+    .admin-card {
+      background: #fff;
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 2px 6px rgba(28, 94, 122, .06);
+      margin-bottom: 14px;
+    }
+
+    .admin-card h3 {
+      margin: 0 0 14px;
+      font-size: 15px;
+      font-weight: 900;
+    }
+
+    .admin-cols {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+    }
+
+    .bar-chart {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      height: 140px;
+    }
+
+    .bar-chart .bar-col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      height: 100%;
+    }
+
+    .bar-chart .bar {
+      width: 100%;
+      max-width: 34px;
+      border-radius: 6px 6px 0 0;
+      background: linear-gradient(180deg, #6fb7d0, #3e9bd1);
+      min-height: 2px;
+      transition: height .3s ease;
+    }
+
+    .bar-val {
+      font-size: 10px;
+      color: var(--ink-soft);
+      margin-bottom: 4px;
+    }
+
+    .bar-label {
+      font-size: 11px;
+      color: #9db4bf;
+      margin-top: 6px;
+    }
+
+    .rank-row {
+      margin-bottom: 11px;
+    }
+
+    .rank-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+
+    .rank-head b {
+      font-weight: 700;
+    }
+
+    .rank-track {
+      background: #eef5f8;
+      border-radius: 4px;
+      height: 8px;
+      overflow: hidden;
+    }
+
+    .rank-fill {
+      height: 100%;
+      border-radius: 4px;
+      background: linear-gradient(90deg, #ec6398, #d84b84);
+    }
+
+    .admin-tabs {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      margin-bottom: 16px;
+      padding-bottom: 2px;
+    }
+
+    .admin-tab {
+      flex-shrink: 0;
+      white-space: nowrap;
+      border: 1.5px solid var(--line);
+      background: #fff;
+      color: var(--ink-soft);
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 700;
+      padding: 9px 18px;
+      border-radius: 999px;
+    }
+
+    .admin-tab.active {
+      border: none;
+      background: var(--ink);
+      color: #fff;
+    }
+
+    .ent-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      background: #fff;
+      border-radius: 14px;
+      padding: 11px 13px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+      box-shadow: 0 2px 6px rgba(28, 94, 122, .05);
+    }
+
+    .ent-row.low {
+      border: 1.5px solid #f2c4be;
+    }
+
+    .mini-btn {
+      border: 1.5px solid var(--line);
+      background: #fff;
+      color: var(--ink-soft);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 6px 10px;
+      border-radius: 999px;
+    }
+
+    .badge {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 9px;
+      border-radius: 999px;
+    }
+
+    .add-btn {
+      border: none;
+      background: var(--pink);
+      color: #fff;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 8px 14px;
+      border-radius: 999px;
+    }
+
+    .hist-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .hist-table th,
+    .hist-table td {
+      text-align: left;
+      padding: 8px 6px;
+      border-bottom: 1px solid #eef5f8;
+    }
+
+    .hist-table th {
+      color: var(--ink-soft);
+      font-size: 12px;
+    }
+
+    /* PIN 鎖畫面 */
+    .pin-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(20, 50, 65, .5);
+      z-index: 60;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .pin-box {
+      background: #fff;
+      border-radius: 20px;
+      padding: 24px;
+      width: 100%;
+      max-width: 340px;
+      box-shadow: 0 12px 34px rgba(0, 0, 0, .22);
+      text-align: center;
+    }
+
+    .pin-box input {
+      width: 100%;
+      box-sizing: border-box;
+      text-align: center;
+      letter-spacing: 6px;
+      border: 1.5px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 18px;
+      color: var(--ink);
+      outline: none;
+    }
+
+    .pin-err {
+      font-size: 13px;
+      color: #e5534b;
+      font-weight: 700;
+      margin-top: 8px;
+    }
+
+    .pin-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .pin-actions button {
+      flex: 1;
+      cursor: pointer;
+      font-weight: 900;
+      padding: 11px;
+      border-radius: 12px;
+      border: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="top-row">
+        <div class="brand">
+          <div class="brand-logo">🐟</div>
+          <div class="brand-text">
+            <h1>小魚乾早午餐</h1>
+            <p>DRIED FISH BRUNCH</p>
+          </div>
+        </div>
+        <div class="info-chip">⏰ 6:00–12:00</div>
+      </div>
+      <div class="address">📍 台南市東區長東街 106 號 · 現點現做，請耐心等候</div>
+      <div class="nav-pills">
+        <a href="customer.html">🍽️ 顧客點餐</a>
+        <a href="kitchen.html">👨‍🍳 廚房後台</a>
+        <a href="cashier.html">💰 外場收銀</a>
+        <a href="display.html">📺 叫號螢幕</a>
+        <a href="admin.html" style="background:#fff;color:var(--ink);">🔒 管理後台</a>
+      </div>
+    </header>
+    <main id="app"></main>
+  </div>
+
+  <style>
+    #print-area { display: none; }
+    /* 螢幕上的列印預覽：先看再按「列印 / 另存 PDF」 */
+    body.preview-open { overflow: hidden; }
+    body.preview-open #print-area { display: block; position: fixed; inset: 0; z-index: 200; background: #fff; overflow: auto; padding: 0 24px 32px; }
+    .rpt-toolbar { position: sticky; top: 0; background: #fff; border-bottom: 1px solid #e3eef3; padding: 12px 0; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .rpt-toolbar button { border: none; border-radius: 999px; padding: 9px 16px; font-weight: 800; font-size: 14px; cursor: pointer; }
+    .rpt-toolbar .rpt-hint { font-size: 12px; color: #888; }
+    #print-area .rpt-h1 { font-size: 22px; color: #1c5e7a; border-bottom: 3px solid #ec6398; padding-bottom: 6px; margin: 0 0 4px; }
+    #print-area .rpt-h2 { font-size: 16px; color: #1c5e7a; border-left: 5px solid #ec6398; padding-left: 8px; margin: 16px 0 6px; }
+    #print-area .rpt-sub { color: #666; margin-bottom: 8px; font-size: 12px; }
+    #print-area table { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 12px; }
+    #print-area th, #print-area td { border: 1px solid #999; padding: 5px 7px; text-align: left; vertical-align: top; }
+    #print-area th { background: #eee; }
+    @media print {
+      body > .page, #toast { display: none !important; }
+      body.preview-open { overflow: visible !important; }
+      #print-area { display: block !important; position: static !important; padding: 0 !important; overflow: visible !important; }
+      .rpt-toolbar { display: none !important; }
+      @page { margin: 12mm; }
+    }
+  </style>
+  <div id="print-area"></div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="shared.js"></script>
+  <script>document.head.insertAdjacentHTML('beforeend', '<style>' + getSharedStyles() + '</style>');</script>
+  <script>
+    const app = document.getElementById('app');
+    let orders = loadOrders();
+    let unlocked = false;
+
+    // 管理後台登入：簡易密碼（登入狀態存 localStorage，登出清除）
+    const ADMIN_PW = '2026';
+    const ADMIN_AUTH_KEY = 'xyg-admin-auth';
+
+    // 建立 品項id -> 分類 對照
+    const ITEM_CAT = {};
+    MENU.forEach(cat => cat.items.forEach(item => { ITEM_CAT[item.id] = cat; }));
+
+    function renderStat(label, value, color) {
+      return `
+        <div class="stat-card">
+          <div style="font-size:24px;font-weight:900;color:${color || 'var(--ink)'};">${value}</div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">${label}</div>
+        </div>
+      `;
+    }
+
+    function renderLogin(errMsg) {
+      app.innerHTML = `
+        <div class="pin-overlay">
+          <div class="pin-box">
+            <div style="font-size:34px;">🔐</div>
+            <h3 style="font-size:18px;font-weight:900;margin:6px 0 2px;">管理後台登入</h3>
+            <div style="font-size:13px;color:var(--ink-soft);margin-bottom:16px;">請輸入管理密碼</div>
+            <input id="login-pw" type="password" inputmode="numeric" placeholder="密碼" autocomplete="current-password" style="text-align:left;letter-spacing:normal;" />
+            <div id="login-err" class="pin-err" style="display:${errMsg ? 'block' : 'none'};">${errMsg || ''}</div>
+            <div class="pin-actions">
+              <a href="customer.html" style="flex:1;border:1.5px solid var(--line);background:#fff;color:var(--ink-soft);font-weight:700;padding:11px;border-radius:12px;text-decoration:none;display:flex;align-items:center;justify-content:center;">返回</a>
+              <button id="login-submit" style="background:var(--pink);color:#fff;">登入</button>
+            </div>
+          </div>
+        </div>
+      `;
+      const pw = document.getElementById('login-pw');
+      const btn = document.getElementById('login-submit');
+      const submit = () => {
+        if (pw.value === ADMIN_PW) {
+          unlocked = true;
+          try { localStorage.setItem(ADMIN_AUTH_KEY, '1'); } catch (e) {}
+          renderAdmin();
+        } else {
+          renderLogin('密碼錯誤');
+        }
+      };
+      btn.addEventListener('click', submit);
+      pw.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+      pw.focus();
+    }
+
+    function renderOffline() {
+      app.innerHTML = `
+        <div class="pin-overlay">
+          <div class="pin-box">
+            <div style="font-size:34px;">📡</div>
+            <h3 style="font-size:18px;font-weight:900;margin:6px 0 2px;">需要連線</h3>
+            <div style="font-size:13px;color:var(--ink-soft);margin-bottom:16px;">管理後台需要連線並登入才能使用</div>
+            <div class="pin-actions">
+              <a href="customer.html" style="flex:1;border:1.5px solid var(--line);background:#fff;color:var(--ink-soft);font-weight:700;padding:11px;border-radius:12px;text-decoration:none;display:flex;align-items:center;justify-content:center;">返回</a>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function barChart(rows, fmt) {
+      const max = Math.max(1, ...rows.map(r => r.value));
+      return `<div class="bar-chart">${rows.map(r => `
+        <div class="bar-col">
+          <div class="bar-val">${fmt ? fmt(r.value) : r.value}</div>
+          <div class="bar" style="height:${Math.round(r.value / max * 100)}%;"></div>
+          <div class="bar-label">${r.label}</div>
+        </div>`).join('')}</div>`;
+    }
+
+    function rankList(rows, fmt, emptyText) {
+      if (rows.length === 0) {
+        return `<div style="color:#9db4bf;font-size:14px;padding:10px 0;">${emptyText}</div>`;
+      }
+      const max = Math.max(1, ...rows.map(r => r.value));
+      return rows.map(r => `
+        <div class="rank-row">
+          <div class="rank-head"><b>${escapeHtml(r.name)}</b><span style="color:var(--ink-soft);">${fmt(r.value)}</span></div>
+          <div class="rank-track"><div class="rank-fill" style="width:${Math.round(r.value / max * 100)}%;"></div></div>
+        </div>
+      `).join('');
+    }
+
+    // ===== 管理後台狀態 =====
+    let cfg = { menu: CURRENT_MENU, ent: JSON.parse(JSON.stringify(DEFAULT_ENT)) };
+    let aTab = 'revenue';
+    let editItem = null; // 菜單品項編輯
+    let autoSaveStatus = ''; // '' | 'saving' | 'saved'（品項彈窗的自動儲存狀態）
+    let entAutoStatus = ''; // 同上，營運資料彈窗（員工/食材/設備/成本）
+    let editEnt = null;  // 員工/食材/設備/成本編輯
+    let histScope = 'today';
+    let feedbacks = [];        // 顧客回饋清單（Firestore feedback 集合）
+    let fbScope = 'all';       // 顧客回饋範圍：today / week / all
+    let reportPeriod = 'day'; // 報表期間：day | week | month
+    let annDraft = { text: '', type: 'info' }; // 公告新增表單的暫存（重繪時不會被清掉）
+    let annEdit = null;        // 正在編輯的公告 { id, text, type }
+    let addonList = [];        // 附加商品清單（Firestore config/addons 的 list 欄位）
+    let addonLoaded = false;   // 雲端附加商品是否載入完成（沒載完不寫入，避免蓋掉既有資料）
+    let addonSeeded = false;   // 目前畫面上的是「程式預設種子」而非雲端資料
+    let addonEdit = null;      // 正在編輯的附加商品 { idx, id, name, img, active, options:[{id,label,price,orig}], isNew }
+    let addonUploading = false; // 圖片正在上傳到 Cloudinary
+
+    // ===== 圖片上傳（Cloudinary unsigned upload）=====
+    // 瀏覽器不能放 API Secret，所以要用 Cloudinary 後台建立的「unsigned upload preset」。
+    // 雲端名稱與 preset 存在 config/admin，店家可在「附加商品」分頁自行修改。
+    const CLOUDINARY_DEFAULT_CLOUD = 'dbiirpmpy'; // 目前圖片所在的 Cloudinary 帳號
+    const CLOUDINARY_FOLDER = 'fish-brunch';      // 上傳後放這個資料夾
+    const CLOUDINARY_MAX_PX = 900;                // 上傳前先縮到最長邊 900px（省流量、顧客載得快）
+    function cloudConf() {
+      const c = cfg.cloudinary || {};
+      return { cloud: (c.cloud || CLOUDINARY_DEFAULT_CLOUD).trim(), preset: (c.preset || '').trim() };
+    }
+
+    const ADMIN_TABS = [
+      { k: 'revenue', label: '營收管理' }, { k: 'ops', label: '營運管理' }, { k: 'cost', label: '成本管理' },
+      { k: 'payroll', label: '薪資管理' }, { k: 'ing', label: '食材管理' }, { k: 'equip', label: '設備管理' },
+      { k: 'menu', label: '菜單管理' }, { k: 'addons', label: '附加商品' }, { k: 'history', label: '歷史訂單' },
+      { k: 'feedback', label: '顧客回饋' }, { k: 'announce', label: '公告管理' },
+    ];
+
+    // 附加商品預設種子：雲端 config/addons 還沒有文件時，後台先顯示這些
+    // （要跟顧客點餐頁 dried-fish-brunch-order-app/index.html 的 DEFAULT_ADDONS 一致）
+    const DEFAULT_ADDONS = [
+      { id: 'addon-milktea', name: '鮮乳',
+        img: 'https://res.cloudinary.com/dbiirpmpy/image/upload/v1785163481/fish-brunch/Fresh_milk_tea.png',
+        options: [{ id: 'bottle900', label: '900ml罐', price: 85, orig: 105 }] },
+      { id: 'addon-radishcake', name: '手作蘿蔔糕',
+        img: 'https://res.cloudinary.com/dbiirpmpy/image/upload/v1784949177/fish-brunch/Radish_cake_512.png',
+        options: [{ id: 'whole', label: '1條', price: 230 }] },
+    ];
+
+    const money = n => '$' + (n || 0).toLocaleString();
+    const fmtTime = ts => new Date(ts).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const fmtDate = ts => new Date(ts).toLocaleDateString('zh-TW', { month: '2-digit', day: '2-digit' });
+    const STATUS = {
+      new: { label: '新訂單', color: '#E89A2B', bg: '#FCF1DC' },
+      cook: { label: '製作中', color: '#3E9BD1', bg: '#E3F1FB' },
+      done: { label: '完成', color: '#3FA877', bg: '#E1F4EA' },
+    };
+    const isPaid = o => !!(o.pay && o.pay.paid);
+    const nameOf = it => it.name || (getItem(it.id) ? getItem(it.id).name : '(未知)');
+    const priceOf = it => (it.price != null ? it.price : (getItem(it.id) ? getItem(it.id).price : 0));
+    const dayKey = ts => { const d = new Date(ts); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+    // 預設 Google Sheet 同步網址（Apps Script Web App）；後台欄位有填則以欄位為準
+    const DEFAULT_SHEET_URL = 'https://script.google.com/macros/s/AKfycbyou6DqfDLxPoScbyPWYfVzltXDtUO4MBlqO1pRcn6KITdyw6Q8chZNh7U-A0w9kY7s/exec';
+
+    // 整理某一天的報表資料（訂單明細 + 金額合計 + 現金/行動分類 + 品項統計）
+    function buildReportData(dateStr) {
+      const day = orders.filter(o => dayKey(o.createdAt) === dateStr && !o.rejected).sort((a, b) => a.createdAt - b.createdAt);
+      const paid = day.filter(isPaid);
+      const cash = paid.filter(o => o.pay && o.pay.method === 'cash');
+      const mobile = paid.filter(o => o.pay && o.pay.method === 'mobile');
+      const sum = arr => arr.reduce((s, o) => s + (o.total || 0), 0);
+      const stat = {};
+      day.forEach(o => (o.items || []).forEach(it => { const n = nameOf(it); if (!stat[n]) stat[n] = { qty: 0, rev: 0 }; stat[n].qty += it.qty; stat[n].rev += priceOf(it) * it.qty; }));
+      const items = Object.keys(stat).map(name => ({ name, qty: stat[name].qty, rev: stat[name].rev })).sort((a, b) => b.qty - a.qty);
+      return { dateStr, day, count: day.length, paidCount: paid.length, revenue: sum(paid), cashCount: cash.length, cashSum: sum(cash), mobileCount: mobile.length, mobileSum: sum(mobile), unpaidCount: day.length - paid.length, items };
+    }
+
+    function orderItemsText(o) {
+      return (o.items || []).map(it => nameOf(it) + (it.temp ? '(' + it.temp + ')' : '') + (it.note ? '[' + it.note + ']' : '') + '×' + it.qty).join('、');
+    }
+    const payText = o => (o.pay && o.pay.paid) ? (o.pay.method === 'cash' ? '現金' : '行動') : '未結';
+
+    // 依日期＋期間（day/week/month）算出起訖與標題
+    function periodRange(dateStr, period) {
+      const p = dateStr.split('-').map(Number);
+      const y = p[0], m = p[1], d = p[2];
+      let start, end, label;
+      if (period === 'week') {
+        const dow = (new Date(y, m - 1, d).getDay() + 6) % 7; // 週一=0
+        start = new Date(y, m - 1, d - dow);
+        end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+        label = '週報　' + dayKey(start) + ' ～ ' + dayKey(end);
+      } else if (period === 'month') {
+        start = new Date(y, m - 1, 1);
+        end = new Date(y, m, 0);
+        label = '月報　' + y + '-' + String(m).padStart(2, '0');
+      } else {
+        start = new Date(y, m - 1, d);
+        end = new Date(y, m - 1, d);
+        label = '日報　' + dateStr;
+      }
+      start.setHours(0, 0, 0, 0); end.setHours(23, 59, 59, 999);
+      return { start, end, label };
+    }
+
+    // 整理某一期間（日/週/月）的完整報表：營收/訂單/品項=真實歷史；成本/薪資/食材/設備=本月或目前快照
+    function buildPeriodReport(dateStr, period) {
+      const rg = periodRange(dateStr, period);
+      const s = rg.start.getTime(), e = rg.end.getTime();
+      const day = orders.filter(o => o.createdAt >= s && o.createdAt <= e && !o.rejected).sort((a, b) => a.createdAt - b.createdAt);
+      const paid = day.filter(isPaid);
+      const cash = paid.filter(o => o.pay && o.pay.method === 'cash');
+      const mobile = paid.filter(o => o.pay && o.pay.method === 'mobile');
+      const sum = arr => arr.reduce((acc, o) => acc + (o.total || 0), 0);
+      const dineIn = day.filter(o => o.type === '內用').length;
+      const takeout = day.length - dineIn;
+
+      // 逐日明細
+      const byDay = {};
+      day.forEach(o => { const k = dayKey(o.createdAt); if (!byDay[k]) byDay[k] = { count: 0, revenue: 0, paidCount: 0 }; byDay[k].count++; if (isPaid(o)) { byDay[k].revenue += o.total || 0; byDay[k].paidCount++; } });
+      const perDay = Object.keys(byDay).sort().map(k => ({ date: k, count: byDay[k].count, paidCount: byDay[k].paidCount, revenue: byDay[k].revenue }));
+
+      // 品項統計
+      const stat = {};
+      day.forEach(o => (o.items || []).forEach(it => { const n = nameOf(it); if (!stat[n]) stat[n] = { qty: 0, rev: 0 }; stat[n].qty += it.qty; stat[n].rev += priceOf(it) * it.qty; }));
+      const items = Object.keys(stat).map(n => ({ name: n, qty: stat[n].qty, rev: stat[n].rev })).sort((a, b) => b.qty - a.qty);
+
+      // 分類營收（已結帳）
+      const catMap = {};
+      paid.forEach(o => (o.items || []).forEach(it => { const cn = catNameOf(it); catMap[cn] = (catMap[cn] || 0) + priceOf(it) * it.qty; }));
+      const cats = Object.keys(catMap).map(n => ({ name: n, value: catMap[n] })).sort((a, b) => b.value - a.value);
+
+      // 管理模組快照（本月／目前設定值）
+      const ent = (cfg && cfg.ent) || {};
+      const costs = ent.costs || [];
+      const costTotal = costs.reduce((acc, c) => acc + (c.amount || 0), 0);
+      const staffRows = (ent.staff || []).map(st => ({ name: st.name, role: st.role, wage: st.wage, hours: st.hours, pay: (st.wage || 0) * (st.hours || 0) }));
+      const payrollTotal = staffRows.reduce((acc, r) => acc + r.pay, 0);
+      const ingredients = ent.ingredients || [];
+      const equipment = ent.equipment || [];
+      const revenue = sum(paid);
+
+      return {
+        label: rg.label, period, start: rg.start, end: rg.end,
+        count: day.length, paidCount: paid.length, unpaidCount: day.length - paid.length,
+        revenue, cashCount: cash.length, cashSum: sum(cash), mobileCount: mobile.length, mobileSum: sum(mobile),
+        dineIn, takeout, day, perDay, items, cats,
+        costs, costTotal, staffRows, payrollTotal, ingredients, equipment,
+        profit: revenue - costTotal - payrollTotal,
+      };
+    }
+
+    // 營運報表預覽（日/週/月）：頁內預覽 → 列印或另存 PDF
+    function printDayReport(dateStr) {
+      if (!dateStr) { showMessage('請選擇日期'); return; }
+      const r = buildPeriodReport(dateStr, reportPeriod);
+      const isMonth = reportPeriod === 'month';
+      const periodWord = reportPeriod === 'month' ? '本月' : reportPeriod === 'week' ? '本週' : '當日';
+
+      const sumRows = `
+        <table>
+          <tr><th>${periodWord}訂單數</th><td>${r.count} 筆</td><th>已結帳</th><td>${r.paidCount} 筆</td><th>未結帳</th><td>${r.unpaidCount} 筆</td></tr>
+          <tr><th>${periodWord}營收</th><td>$${r.revenue}</td><th>💵 現金</th><td>$${r.cashSum}（${r.cashCount}筆）</td><th>📱 行動</th><td>$${r.mobileSum}（${r.mobileCount}筆）</td></tr>
+          <tr><th>內用</th><td>${r.dineIn} 筆</td><th>外帶</th><td>${r.takeout} 筆</td><th>平均客單</th><td>$${r.paidCount ? Math.round(r.revenue / r.paidCount) : 0}</td></tr>
+        </table>`;
+
+      const perDayRows = r.perDay.length ? r.perDay.map(d => `<tr><td>${d.date}</td><td style="text-align:right">${d.count}</td><td style="text-align:right">${d.paidCount}</td><td style="text-align:right">$${d.revenue}</td></tr>`).join('') : '<tr><td colspan="4">本期間無訂單</td></tr>';
+      const perDaySection = reportPeriod === 'day' ? '' : `
+        <div class="rpt-h2">逐日明細</div>
+        <table><tr><th>日期</th><th style="text-align:right">訂單數</th><th style="text-align:right">已結帳</th><th style="text-align:right">營收</th></tr>${perDayRows}
+        <tr><th>合計</th><th style="text-align:right">${r.count}</th><th style="text-align:right">${r.paidCount}</th><th style="text-align:right">$${r.revenue}</th></tr></table>`;
+
+      const itemRows = r.items.length ? r.items.map(it => `<tr><td>${escapeHtml(it.name)}</td><td style="text-align:right">${it.qty}</td><td style="text-align:right">$${it.rev}</td></tr>`).join('') : '<tr><td colspan="3">無</td></tr>';
+      const catRows = r.cats.length ? r.cats.map(c => `<tr><td>${escapeHtml(c.name)}</td><td style="text-align:right">$${c.value}</td></tr>`).join('') : '<tr><td colspan="2">無</td></tr>';
+      const orderRows = r.day.length ? r.day.map(o => `<tr><td>${escapeHtml(o.no)}</td><td>${reportPeriod === 'day' ? fmtTime(o.createdAt) : (fmtDate(o.createdAt) + ' ' + fmtTime(o.createdAt))}</td><td>${o.type} ${escapeHtml(o.table || '')}</td><td>${escapeHtml(orderItemsText(o))}</td><td>${payText(o)}</td><td style="text-align:right">$${o.total}</td></tr>`).join('') : '<tr><td colspan="6">本期間無訂單</td></tr>';
+
+      const costRows = r.costs.length ? r.costs.map(c => `<tr><td>${escapeHtml(c.label)}</td><td style="text-align:right">$${c.amount}</td></tr>`).join('') : '<tr><td colspan="2">無</td></tr>';
+      const staffRows = r.staffRows.length ? r.staffRows.map(s => `<tr><td>${escapeHtml(s.name)}</td><td>${escapeHtml(s.role || '')}</td><td style="text-align:right">$${s.wage}</td><td style="text-align:right">${s.hours}</td><td style="text-align:right">$${s.pay}</td></tr>`).join('') : '<tr><td colspan="5">無</td></tr>';
+      const ingRows = r.ingredients.length ? r.ingredients.map(g => `<tr><td>${escapeHtml(g.name)}</td><td style="text-align:right">${g.stock} ${escapeHtml(g.unit || '')}</td><td style="text-align:right">${g.lowAt}</td><td>${(g.stock <= g.lowAt) ? '⚠️ 偏低' : '正常'}</td><td>${escapeHtml(g.supplier || '')}</td></tr>`).join('') : '<tr><td colspan="5">無</td></tr>';
+      const eqRows = r.equipment.length ? r.equipment.map(q => `<tr><td>${escapeHtml(q.name)}</td><td>${escapeHtml(q.status || '')}</td><td>${escapeHtml(q.lastService || '')}</td></tr>`).join('') : '<tr><td colspan="3">無</td></tr>';
+
+      const profitSection = `
+        <div class="rpt-h2">簡易損益${isMonth ? '（月）' : ''}</div>
+        <table>
+          <tr><th>${periodWord}營收</th><td style="text-align:right">$${r.revenue}</td></tr>
+          <tr><th>本月成本</th><td style="text-align:right">－$${r.costTotal}</td></tr>
+          <tr><th>本月薪資</th><td style="text-align:right">－$${r.payrollTotal}</td></tr>
+          <tr><th>結餘（營收－成本－薪資）</th><td style="text-align:right;font-weight:900;color:${r.profit >= 0 ? '#1c5e7a' : '#e5534b'};">$${r.profit}</td></tr>
+          <tr><th>毛利率（結餘 ÷ 營收）</th><td style="text-align:right;font-weight:900;color:${r.profit >= 0 ? '#1c5e7a' : '#e5534b'};">${r.revenue > 0 ? Math.round(r.profit / r.revenue * 100) : 0}%</td></tr>
+        </table>
+        ${isMonth ? '' : '<div class="rpt-sub">※ 成本與薪資為「本月固定值」，與本期間營收相比僅供參考；損益建議看「月報」。</div>'}`;
+
+      const area = document.getElementById('print-area');
+      area.innerHTML = `
+        <div class="rpt-toolbar">
+          <button id="rpt-print" style="background:var(--pink);color:#fff;">🖨️ 列印 / 另存 PDF</button>
+          <button id="rpt-close" style="background:#eef5f8;color:var(--ink);">✕ 關閉預覽</button>
+          <span class="rpt-hint">在列印視窗的「目的地 / 印表機」選「<b>另存為 PDF</b>」即可存成 PDF 檔</span>
+        </div>
+        <div class="rpt-h1">🐟 小魚乾早午餐 · 營運報表</div>
+        <div class="rpt-sub">${escapeHtml(r.label)}　列印時間：${fmtDate(Date.now())} ${fmtTime(Date.now())}</div>
+
+        <div class="rpt-h2">營收摘要</div>${sumRows}
+        ${perDaySection}
+        <div class="rpt-h2">品項銷售統計</div><table><tr><th>品項</th><th style="text-align:right">數量</th><th style="text-align:right">小計</th></tr>${itemRows}</table>
+        <div class="rpt-h2">分類營收</div><table><tr><th>分類</th><th style="text-align:right">營收</th></tr>${catRows}</table>
+        <div class="rpt-h2">訂單明細</div><table><tr><th>取餐號</th><th>時間</th><th>類型/桌號</th><th>品項</th><th>付款</th><th style="text-align:right">金額</th></tr>${orderRows}</table>
+
+        <div class="rpt-h2">成本（本月）</div><table><tr><th>項目</th><th style="text-align:right">金額</th></tr>${costRows}<tr><th>合計</th><th style="text-align:right">$${r.costTotal}</th></tr></table>
+        <div class="rpt-h2">薪資（本月）</div><table><tr><th>姓名</th><th>職務</th><th style="text-align:right">時薪</th><th style="text-align:right">時數</th><th style="text-align:right">薪資</th></tr>${staffRows}<tr><th colspan="4">合計</th><th style="text-align:right">$${r.payrollTotal}</th></tr></table>
+        ${profitSection}
+
+        <div class="rpt-h2">食材庫存（目前）</div><table><tr><th>品名</th><th style="text-align:right">庫存</th><th style="text-align:right">安全量</th><th>狀態</th><th>供應商</th></tr>${ingRows}</table>
+        <div class="rpt-h2">設備狀態（目前）</div><table><tr><th>設備</th><th>狀態</th><th>上次保養</th></tr>${eqRows}</table>`;
+      document.body.classList.add('preview-open');
+      window.scrollTo(0, 0);
+      document.getElementById('rpt-print').addEventListener('click', () => window.print());
+      document.getElementById('rpt-close').addEventListener('click', () => { document.body.classList.remove('preview-open'); area.innerHTML = ''; });
+    }
+
+    // 同步當日報表到 Google Sheet（Apps Script Web App）
+    async function syncDayToSheet(dateStr) {
+      if (!dateStr) { showMessage('請選擇日期'); return; }
+      const url = ((cfg && cfg.sheetUrl) || DEFAULT_SHEET_URL || '').trim();
+      if (!url) { showMessage('請先填寫並儲存 Google Sheet 連結網址'); return; }
+      const r = buildReportData(dateStr);
+      const payload = {
+        date: dateStr, store: '小魚乾早午餐',
+        summary: { count: r.count, paidCount: r.paidCount, unpaidCount: r.unpaidCount, revenue: r.revenue, cashCount: r.cashCount, cashSum: r.cashSum, mobileCount: r.mobileCount, mobileSum: r.mobileSum },
+        orders: r.day.map(o => ({ no: o.no, time: fmtTime(o.createdAt), typeTable: o.type + ' · ' + (o.table || ''), status: (STATUS[o.status] || {}).label || o.status || '', pay: payText(o), total: o.total || 0 })),
+        items: r.items
+      };
+      try {
+        await fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+        showMessage('已送出到 Google Sheet，請到試算表確認 ✅');
+      } catch (e) {
+        showMessage('同步失敗：' + (e && e.message ? e.message : '請檢查網址'));
+      }
+    }
+    function catNameOf(it) {
+      for (const c of CURRENT_MENU) for (const i of c.items) if (i.id === it.id || i.name === it.name) return c.name;
+      return '其他';
+    }
+
+    // ---------- 各分頁內容 ----------
+    function tabRevenue() {
+      const today = orders.filter(o => isToday(o.createdAt) && !o.rejected);
+      const paid = today.filter(isPaid);
+      const revenue = paid.reduce((s, o) => s + (o.total || 0), 0);
+      const doneC = today.filter(o => o.status === 'done').length;
+      const dineIn = today.filter(o => o.type === '內用').length;
+      const takeout = today.length - dineIn;
+      const cash = today.filter(o => o.pay && o.pay.paid && o.pay.method === 'cash').reduce((s, o) => s + o.total, 0);
+      const mobile = today.filter(o => o.pay && o.pay.paid && o.pay.method === 'mobile').reduce((s, o) => s + o.total, 0);
+      const unpaid = today.filter(o => !isPaid(o)).reduce((s, o) => s + (o.total || 0), 0);
+
+      const catMap = {};
+      paid.forEach(o => (o.items || []).forEach(it => {
+        const cn = catNameOf(it);
+        catMap[cn] = (catMap[cn] || 0) + priceOf(it) * it.qty;
+      }));
+      const catRows = Object.entries(catMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+
+      const itemMap = {};
+      today.forEach(o => (o.items || []).forEach(it => {
+        const n = nameOf(it);
+        itemMap[n] = (itemMap[n] || 0) + it.qty;
+      }));
+      const topRows = Object.entries(itemMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 6);
+
+      const now = new Date();
+      const dayRows = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+        const key = d.toDateString();
+        const sum = orders.filter(o => isPaid(o) && new Date(o.createdAt).toDateString() === key).reduce((s, o) => s + (o.total || 0), 0);
+        dayRows.push({ label: (d.getMonth() + 1) + '/' + d.getDate(), value: sum });
+      }
+
+      const payRows = [
+        { name: '💵 現金', value: cash }, { name: '📱 行動支付', value: mobile }, { name: '⏳ 未結帳', value: unpaid },
+      ].filter(r => r.value > 0);
+
+      return `
+        <div class="stats-grid">
+          ${renderStat('今日訂單', today.length)}
+          ${renderStat('已收營業額', '$' + revenue, 'var(--green)')}
+          ${renderStat('已完成', doneC, 'var(--blue)')}
+          ${renderStat('內用 / 外帶', dineIn + ' / ' + takeout, 'var(--pink)')}
+        </div>
+        <div class="admin-card"><h3>近 7 日營收</h3>${barChart(dayRows, v => '$' + v)}</div>
+        <div class="admin-cols">
+          <div class="admin-card"><h3>付款方式分布</h3>${rankList(payRows, v => '$' + v, '今天還沒有銷售紀錄')}</div>
+          <div class="admin-card"><h3>今日分類營收</h3>${rankList(catRows, v => '$' + v, '今天還沒有完成的訂單')}</div>
+          <div class="admin-card"><h3>今日熱銷排行</h3>${rankList(topRows, v => v + ' 份', '今天還沒有銷售紀錄')}</div>
+        </div>`;
+    }
+
+    function tabOps() {
+      const today = orders.filter(o => isToday(o.createdAt));
+      const totalT = today.length;
+      const completion = totalT ? Math.round(today.filter(o => o.status === 'done').length / totalT * 100) : 0;
+      const avgItems = totalT ? (today.reduce((s, o) => s + (o.items || []).reduce((a, i) => a + i.qty, 0), 0) / totalT) : 0;
+      const doneOrders = today.filter(o => o.status === 'done' && o.updatedAt && o.updatedAt > o.createdAt);
+      const avgPrep = doneOrders.length ? Math.round(doneOrders.reduce((s, o) => s + (o.updatedAt - o.createdAt), 0) / doneOrders.length / 60000) : 0;
+      const dineIn = today.filter(o => o.type === '內用').length;
+      const takeout = totalT - dineIn;
+      const hrs = [6, 7, 8, 9, 10, 11, 12];
+      const hc = {};
+      today.forEach(o => { const h = new Date(o.createdAt).getHours(); hc[h] = (hc[h] || 0) + 1; });
+      const hourRows = hrs.map(h => ({ label: h + '時', value: hc[h] || 0 }));
+
+      return `
+        <div class="stats-grid">
+          ${renderStat('今日訂單', totalT)}
+          ${renderStat('完成率', completion + '%', 'var(--green)')}
+          ${renderStat('平均每單品項', avgItems.toFixed(1), 'var(--pink)')}
+          ${renderStat('平均出餐時間', avgPrep + ' 分', 'var(--amber)')}
+        </div>
+        <div class="admin-card"><h3>營業時段分布（今日訂單數）</h3>${barChart(hourRows)}</div>
+        <div class="admin-card"><h3>即時營運概況</h3>
+          ${[
+            { name: '內用 / 外帶', value: dineIn + ' / ' + takeout },
+            { name: '製作中 / 待製作', value: today.filter(o => o.status === 'cook').length + ' / ' + today.filter(o => o.status === 'new').length },
+          ].map(r => `<div class="ent-row"><span style="font-weight:700;">${r.name}</span><span style="font-weight:900;color:var(--ink-soft);">${r.value}</span></div>`).join('')}
+        </div>`;
+    }
+
+    function tabCost() {
+      const now = new Date();
+      const payrollTotal = (cfg.ent.staff || []).reduce((a, s) => a + (s.wage || 0) * (s.hours || 0), 0);
+      const costRows = [
+        ...(cfg.ent.costs || []).map(c => ({ label: c.label, amount: c.amount || 0, id: c.id, auto: false })),
+        { label: '人事薪資（自動）', amount: payrollTotal, id: '_pay', auto: true },
+      ];
+      const costTotal = costRows.reduce((a, c) => a + c.amount, 0);
+      const sameMonth = ts => { const d = new Date(ts); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); };
+      const monthOrders = orders.filter(o => isPaid(o) && sameMonth(o.createdAt));
+      const monthRev = monthOrders.reduce((s, o) => s + (o.total || 0), 0);
+      const monthCount = monthOrders.length;
+      const profit = monthRev - costTotal;
+      const margin = monthRev > 0 ? Math.round(profit / monthRev * 100) : 0; // 毛利率 %
+      const avgOrder = monthCount ? Math.round(monthRev / monthCount) : 0;    // 客單價
+      const avgProfit = monthCount ? Math.round(profit / monthCount) : 0;     // 平均每單利潤
+      const maxCost = Math.max(1, ...costRows.map(c => c.amount));
+
+      const bars = costRows.map(c => `
+        <div class="rank-row">
+          <div class="rank-head">
+            <b>${escapeHtml(c.label)}</b>
+            <span style="display:flex;align-items:center;gap:8px;color:var(--ink-soft);">
+              ${money(c.amount)}
+              ${c.auto ? '' : `<button class="mini-btn" data-action="ent-edit" data-kind="cost" data-id="${c.id}">編輯</button><button class="mini-btn" data-action="ent-del" data-kind="cost" data-id="${c.id}">🗑</button>`}
+            </span>
+          </div>
+          <div class="rank-track"><div class="rank-fill" style="width:${Math.round(c.amount / maxCost * 100)}%;${c.auto ? 'background:linear-gradient(90deg,#6fb7d0,#3e9bd1);' : ''}"></div></div>
+        </div>`).join('');
+
+      return `
+        <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);">
+          ${renderStat('本月營收', money(monthRev), 'var(--green)')}
+          ${renderStat('本月成本', money(costTotal), '#e5534b')}
+          ${renderStat('本月毛利', money(profit), profit >= 0 ? 'var(--green)' : '#e5534b')}
+          ${renderStat('毛利率', margin + '%', margin >= 0 ? 'var(--green)' : '#e5534b')}
+        </div>
+        <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);">
+          ${renderStat('本月訂單數', monthCount)}
+          ${renderStat('客單價', money(avgOrder), 'var(--blue)')}
+          ${renderStat('平均每單利潤', money(avgProfit), avgProfit >= 0 ? 'var(--green)' : '#e5534b')}
+        </div>
+        <div class="admin-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+            <h3 style="margin:0;">本月成本明細</h3>
+            <button class="add-btn" data-action="ent-add" data-kind="cost">＋ 新增成本</button>
+          </div>
+          ${bars}
+        </div>`;
+    }
+
+    function tabPayroll() {
+      const staff = cfg.ent.staff || [];
+      const total = staff.reduce((a, s) => a + (s.wage || 0) * (s.hours || 0), 0);
+      const rows = staff.map(s => `
+        <div class="ent-row">
+          <div>
+            <div style="font-weight:700;">${escapeHtml(s.name)} <span style="font-size:12px;color:var(--ink-soft);font-weight:400;">${escapeHtml(s.role || '')}</span></div>
+            <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">時薪 $${s.wage} × ${s.hours} 小時</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-weight:900;color:var(--pink);">${money((s.wage || 0) * (s.hours || 0))}</span>
+            <button class="mini-btn" data-action="ent-edit" data-kind="staff" data-id="${s.id}">編輯</button>
+            <button class="mini-btn" data-action="ent-del" data-kind="staff" data-id="${s.id}">🗑</button>
+          </div>
+        </div>`).join('') || '<div style="color:#9db4bf;padding:10px 0;">尚無員工資料</div>';
+      return `
+        <div class="stats-grid" style="grid-template-columns:repeat(2,1fr);">
+          ${renderStat('員工人數', staff.length)}
+          ${renderStat('本月薪資總額', money(total), 'var(--pink)')}
+        </div>
+        <div class="admin-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+            <h3 style="margin:0;">員工薪資</h3>
+            <button class="add-btn" data-action="ent-add" data-kind="staff">＋ 新增員工</button>
+          </div>
+          ${rows}
+        </div>`;
+    }
+
+    function tabIng() {
+      const ings = cfg.ent.ingredients || [];
+      const low = ings.filter(g => (g.stock || 0) <= (g.lowAt || 0)).length;
+      const rows = ings.map(g => {
+        const isLow = (g.stock || 0) <= (g.lowAt || 0);
+        return `
+        <div class="ent-row${isLow ? ' low' : ''}">
+          <div>
+            <div style="font-weight:700;">${escapeHtml(g.name)} <span class="badge" style="background:${isLow ? '#fbe3e1' : '#e1f4ea'};color:${isLow ? '#e5534b' : '#3fa877'};">${isLow ? '需補貨' : '庫存正常'}</span></div>
+            <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">安全庫存 ${g.lowAt} ${g.unit} · ${escapeHtml(g.supplier || '')}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <button class="mini-btn" data-action="ing-minus" data-id="${g.id}">－</button>
+            <span style="font-weight:900;min-width:54px;text-align:center;">${g.stock} ${g.unit}</span>
+            <button class="mini-btn" data-action="ing-plus" data-id="${g.id}">＋</button>
+            <button class="mini-btn" data-action="ent-edit" data-kind="ingredient" data-id="${g.id}">編輯</button>
+            <button class="mini-btn" data-action="ent-del" data-kind="ingredient" data-id="${g.id}">🗑</button>
+          </div>
+        </div>`;
+      }).join('') || '<div style="color:#9db4bf;padding:10px 0;">尚無食材資料</div>';
+      return `
+        <div class="stats-grid" style="grid-template-columns:repeat(2,1fr);">
+          ${renderStat('食材品項', ings.length)}
+          ${renderStat('需補貨', low, low > 0 ? '#e5534b' : 'var(--green)')}
+        </div>
+        <div class="admin-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+            <h3 style="margin:0;">食材庫存</h3>
+            <button class="add-btn" data-action="ent-add" data-kind="ingredient">＋ 新增食材</button>
+          </div>
+          ${rows}
+        </div>`;
+    }
+
+    function tabEquip() {
+      const eq = cfg.ent.equipment || [];
+      const attention = eq.filter(q => q.status !== '正常').length;
+      const color = { '正常': '#3fa877', '保養中': '#e89a2b', '維修中': '#e5534b' };
+      const bg = { '正常': '#e1f4ea', '保養中': '#fcf1dc', '維修中': '#fbe3e1' };
+      const rows = eq.map(q => `
+        <div class="ent-row">
+          <div>
+            <div style="font-weight:700;">${escapeHtml(q.name)}</div>
+            <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">上次保養 ${escapeHtml(q.lastService || '—')}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button class="badge" data-action="eq-cycle" data-id="${q.id}" style="cursor:pointer;border:none;background:${bg[q.status] || '#eef5f8'};color:${color[q.status] || '#4690ae'};font-size:12px;padding:5px 12px;">${q.status}</button>
+            <button class="mini-btn" data-action="ent-edit" data-kind="equipment" data-id="${q.id}">編輯</button>
+            <button class="mini-btn" data-action="ent-del" data-kind="equipment" data-id="${q.id}">🗑</button>
+          </div>
+        </div>`).join('') || '<div style="color:#9db4bf;padding:10px 0;">尚無設備資料</div>';
+      return `
+        <div class="stats-grid" style="grid-template-columns:repeat(2,1fr);">
+          ${renderStat('設備總數', eq.length)}
+          ${renderStat('待處理', attention, attention > 0 ? '#e5534b' : 'var(--green)')}
+        </div>
+        <div class="admin-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+            <h3 style="margin:0;">設備狀態 <span style="font-size:12px;color:var(--ink-soft);font-weight:400;">（點狀態可切換）</span></h3>
+            <button class="add-btn" data-action="ent-add" data-kind="equipment">＋ 新增設備</button>
+          </div>
+          ${rows}
+        </div>`;
+    }
+
+    function tabMenu() {
+      const settingsBar = `
+        <div class="admin-card" style="margin-bottom:14px;">
+          <h3 style="margin:0 0 10px;">🏪 營業設定</h3>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <label style="font-size:13px;display:flex;align-items:center;gap:6px;font-weight:700;">
+              <input id="close-enabled" type="checkbox" ${cfg.closeEnabled ? 'checked' : ''} style="width:18px;height:18px;"> 啟用結單時間
+            </label>
+            <label style="font-size:13px;">結單時間</label>
+            <input id="close-time" type="time" value="${escapeHtml(cfg.closeTime || '11:50')}" style="border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;">
+            <button class="mini-btn" data-action="save-close-time">儲存</button>
+          </div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:8px;">
+            啟用後，超過結單時間顧客點餐頁會停止接單（廚房／收銀不受影響）。${cfg.closeEnabled ? '' : '<b style="color:#e5534b;">目前為暫停狀態（測試用）</b>，測試完勾選「啟用結單時間」再儲存即可恢復。'}
+          </div>
+        </div>`;
+      const addCatBar = `
+        <div class="admin-card" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+          <h3 style="margin:0;">📋 菜單大類</h3>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="mini-btn" data-action="menu-reset-default" style="border:1.5px solid #e5534b;color:#e5534b;background:#fff;" title="把雲端菜單覆蓋成程式內建的預設菜單（含最新完整品名）">🔄 重設成預設菜單</button>
+            <button class="add-btn" data-action="cat-add">＋ 新增大類</button>
+          </div>
+        </div>`;
+      return settingsBar + addCatBar + cfg.menu.map(cat => {
+        const items = cat.items.map(it => {
+          const off = it.active === false, so = !!it.soldOut;
+          return `
+          <div class="ent-row" style="opacity:${off ? .5 : 1};">
+            <div style="font-weight:700;">${escapeHtml(it.name)} <span style="color:var(--ink-soft);font-weight:400;">$${it.price}</span>${so ? ' <span class="badge" style="background:#fcf1dc;color:#e89a2b;">售完</span>' : ''}${(it.opts && it.opts.length) ? `<div style="font-size:11px;color:var(--ink-soft);font-weight:400;margin-top:2px;">📝 ${it.opts.map(escapeHtml).join('、')}</div>` : ''}${(it.addons && it.addons.length) ? `<div style="font-size:11px;color:var(--pink);font-weight:400;margin-top:2px;">💰 ${it.addons.map(a => '+$' + a.price + ' ' + escapeHtml(a.name)).join('、')}</div>` : ''}</div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+              <button class="mini-btn" data-action="item-active" data-cat="${cat.id}" data-id="${it.id}">${off ? '上架' : '下架'}</button>
+              <button class="mini-btn" data-action="item-sold" data-cat="${cat.id}" data-id="${it.id}" style="background:${so ? '#e1f4ea' : '#fcf1dc'};color:${so ? '#3fa877' : '#e89a2b'};border:none;">${so ? '補貨' : '售完'}</button>
+              <button class="mini-btn" data-action="item-edit" data-cat="${cat.id}" data-id="${it.id}">編輯</button>
+              <button class="mini-btn" data-action="item-del" data-cat="${cat.id}" data-id="${it.id}">🗑</button>
+            </div>
+          </div>`;
+        }).join('');
+        return `
+          <div class="admin-card">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px;flex-wrap:wrap;">
+              <h3 style="margin:0;">${cat.icon} ${escapeHtml(cat.name)} ${custCount(cat) > 0
+                ? `<span class="badge" style="background:#e4f4ec;color:#3fa877;">顧客看得到 ${custCount(cat)} 項</span>`
+                : '<span class="badge" style="background:#fdecec;color:#e05252;">顧客看不到</span>'}</h3>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                ${custCount(cat) < cat.items.length || isHiddenForCustomer(cat)
+                  ? `<button class="mini-btn" data-action="cat-publish" data-cat="${cat.id}" style="border-color:var(--pink);color:var(--pink);font-weight:900;">🚀 送出到顧客點餐</button>` : ''}
+                <button class="mini-btn" data-action="cat-visible" data-cat="${cat.id}" style="${isHiddenForCustomer(cat) ? 'border-color:#9db4bf;color:#7c93a0;' : 'border-color:#3fa877;color:#3fa877;'}">${isHiddenForCustomer(cat) ? '🚫 顧客不可見' : '👁 顧客可見'}</button>
+                <button class="mini-btn" data-action="cat-rename" data-cat="${cat.id}">✏️ 改名</button>
+                <button class="mini-btn" data-action="cat-del" data-cat="${cat.id}">🗑 刪除大類</button>
+                <button class="add-btn" data-action="item-add" data-cat="${cat.id}">＋ 新增品項</button>
+              </div>
+            </div>
+            ${items}
+          </div>`;
+      }).join('');
+    }
+
+    // ---------- 附加商品（顧客手機點餐頁的「🧋 附加商品」區）----------
+    const addonPriceText = op => '$' + op.price + (op.orig ? `<span style="color:#9db4bf;font-weight:400;text-decoration:line-through;margin-left:4px;">$${op.orig}</span>` : '');
+    const addonThumb = (img, size) => img
+      ? `<img src="${escapeHtml(img)}" alt="" loading="lazy" style="width:${size}px;height:${size}px;border-radius:12px;object-fit:cover;background:var(--pink-bg);flex:none;">`
+      : `<div style="width:${size}px;height:${size}px;border-radius:12px;background:var(--pink-bg);display:flex;align-items:center;justify-content:center;font-size:${Math.round(size / 2)}px;flex:none;">🍽️</div>`;
+
+    // 圖片上傳設定：沒設定 upload preset 就傳不了圖，直接把設定方式寫在畫面上
+    function cloudSettingsCard() {
+      const c = cloudConf();
+      const inputStyle = 'border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;font:inherit;color:var(--ink);outline:none;box-sizing:border-box;';
+      return `
+        <div class="admin-card" style="margin-bottom:14px;border:${c.preset ? '1px solid var(--line)' : '1.5px solid #e89a2b'};">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+            <h3 style="margin:0;font-size:15px;">☁️ 圖片上傳設定（Cloudinary）${c.preset
+              ? '<span class="badge" style="background:#e4f4ec;color:#3fa877;">可以上傳</span>'
+              : '<span class="badge" style="background:#fcf1dc;color:#e89a2b;">尚未設定</span>'}</h3>
+            <button class="mini-btn" data-action="ao-cloud-save">儲存設定</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;">
+            <label style="font-size:12px;color:var(--ink-soft);white-space:nowrap;">雲端名稱 Cloud name</label>
+            <input id="cloud-name" value="${escapeHtml(c.cloud)}" style="${inputStyle}width:180px;">
+            <label style="font-size:12px;color:var(--ink-soft);white-space:nowrap;">上傳預設 Upload preset</label>
+            <input id="cloud-preset" placeholder="例：xyg_unsigned" value="${escapeHtml(c.preset)}" style="${inputStyle}width:200px;">
+          </div>
+          ${c.preset ? '' : `<div style="font-size:12px;color:var(--ink-soft);margin-top:10px;line-height:1.8;">
+            還沒設定「上傳預設」，所以現在只能貼圖片網址。設定一次就好：<br>
+            1️⃣ 登入 <b>cloudinary.com</b> → 右上齒輪 <b>Settings</b> → <b>Upload</b> → <b>Upload presets</b><br>
+            2️⃣ 按 <b>Add upload preset</b>，把 <b>Signing Mode</b> 選成 <b>Unsigned</b>，取個名字（例：<b>xyg_unsigned</b>）後儲存<br>
+            3️⃣ 把那個名字填到上面的「上傳預設」欄位，按「儲存設定」即可開始上傳
+          </div>`}
+        </div>`;
+    }
+
+    function tabAddons() {
+      const head = `
+        <div class="admin-card" style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+          <div style="min-width:0;">
+            <h3 style="margin:0;">🧋 附加商品 ${addonLoaded
+              ? (addonSeeded
+                  ? '<span class="badge" style="background:#fcf1dc;color:#e89a2b;">預設商品（雲端尚無資料）</span>'
+                  : `<span class="badge" style="background:#e4f4ec;color:#3fa877;">顧客看得到 ${addonList.filter(a => a.active !== false).length} 項</span>`)
+              : '<span class="badge" style="background:#e3f1fb;color:#3e9bd1;">雲端載入中…</span>'}</h3>
+            <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;line-height:1.6;">
+              顯示在顧客手機點餐頁最上方的「🧋 附加商品」區，可跟餐點放同一張訂單送出。<br>
+              圖片可直接從手機或電腦選檔上傳（會自動縮圖後傳到 Cloudinary），留空會顯示 🍽️ 圖示。${addonSeeded ? '<br><b style="color:#e89a2b;">目前顯示的是程式預設商品；只要新增或編輯任何一項存檔，之後就完全以這裡的設定為準。</b>' : ''}
+            </div>
+          </div>
+          <button class="add-btn" data-action="ao-add" style="flex:none;">＋ 新增附加商品</button>
+        </div>` + cloudSettingsCard();
+
+      if (!addonList.length) {
+        return head + `<div class="admin-card" style="color:#9db4bf;padding:14px 0;">目前沒有附加商品，顧客點餐頁不會出現這一區。按右上「＋ 新增附加商品」建立第一項（例：鮮乳 · 900ml罐 $85）。</div>`;
+      }
+
+      const rows = addonList.map((a, i) => {
+        const off = a.active === false;
+        const opts = Array.isArray(a.options) ? a.options : [];
+        const optText = opts.length
+          ? opts.map(op => `<span style="display:inline-block;margin-right:10px;">${escapeHtml(op.label || '規格')} <b style="color:var(--pink);">${addonPriceText(op)}</b></span>`).join('')
+          : '<span style="color:#e5534b;">尚未設定規格與金額</span>';
+        return `
+          <div class="ent-row" style="opacity:${off ? .5 : 1};align-items:center;">
+            <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+              ${addonThumb(a.img, 46)}
+              <div style="min-width:0;">
+                <div style="font-weight:700;">${escapeHtml(a.name || '(未命名)')}${off ? ' <span class="badge" style="background:#eef3f6;color:#7c93a0;">已下架</span>' : ''}</div>
+                <div style="font-size:12px;color:var(--ink-soft);margin-top:3px;">${optText}</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+              <button class="mini-btn" data-action="ao-up" data-idx="${i}"${i === 0 ? ' disabled style="opacity:.35;"' : ''}>↑</button>
+              <button class="mini-btn" data-action="ao-down" data-idx="${i}"${i === addonList.length - 1 ? ' disabled style="opacity:.35;"' : ''}>↓</button>
+              <button class="mini-btn" data-action="ao-active" data-idx="${i}">${off ? '上架' : '下架'}</button>
+              <button class="mini-btn" data-action="ao-edit" data-idx="${i}">編輯</button>
+              <button class="mini-btn" data-action="ao-del" data-idx="${i}">🗑</button>
+            </div>
+          </div>`;
+      }).join('');
+
+      return head + `<div class="admin-card">${rows}</div>`;
+    }
+
+    function tabHistory() {
+      const today = orders.filter(o => isToday(o.createdAt));
+      const pool = histScope === 'today' ? today : orders;
+      const rev = pool.filter(isPaid).reduce((s, o) => s + (o.total || 0), 0);
+      const list = pool.slice().sort((a, b) => b.createdAt - a.createdAt);
+      const rowsHtml = list.map(o => {
+        const st = o.rejected ? { label: '已拒單', color: '#e5534b', bg: '#fdecea' } : (STATUS[o.status] || STATUS.new);
+        const pd = o.pay && o.pay.paid;
+        const payLabel = o.rejected ? '—' : (pd ? (o.pay.method === 'cash' ? '💵 現金' : '📱 行動') : '未結');
+        const when = histScope === 'today' ? fmtTime(o.createdAt) : (fmtDate(o.createdAt) + ' ' + fmtTime(o.createdAt));
+        const itemsText = orderItemsText(o) || '—';
+        return `<tr>
+          <td style="font-weight:900;color:var(--pink);">${o.no}</td>
+          <td>${when}</td>
+          <td>${o.type} · ${escapeHtml(o.table || '')}</td>
+          <td style="font-size:12px;color:var(--ink-soft);max-width:280px;white-space:normal;line-height:1.5;">${escapeHtml(itemsText)}${o.note ? `<div style="color:var(--amber);">📝 ${escapeHtml(o.note)}</div>` : ''}</td>
+          <td><span class="badge" style="background:${st.bg};color:${st.color};">${st.label}</span></td>
+          <td style="color:${pd ? '#3fa877' : '#9db4bf'};font-weight:700;">${payLabel}</td>
+          <td style="font-weight:900;text-align:right;">$${o.total}</td>
+          <td style="text-align:center;"><button class="mini-btn" data-action="hist-del" data-id="${o.id}" style="background:#fdecea;color:#e5534b;border:none;">🗑 刪除</button></td>
+        </tr>`;
+      }).join('');
+      const tbtn = on => `border-radius:999px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer;${on ? 'border:none;background:var(--ink);color:#fff;' : 'border:1.5px solid var(--line);background:#fff;color:var(--ink-soft);'}`;
+      return `
+        <div class="admin-card" style="margin-bottom:14px;">
+          <h3 style="margin:0 0 10px;">📑 營運報表（日／週／月）</h3>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <label style="font-size:13px;">日期</label>
+            <input type="date" id="hist-date" value="${dayKey(Date.now())}" style="border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;">
+            <div style="display:flex;gap:6px;">
+              <button data-action="rpt-day" style="${tbtn(reportPeriod === 'day')}">日報</button>
+              <button data-action="rpt-week" style="${tbtn(reportPeriod === 'week')}">週報</button>
+              <button data-action="rpt-month" style="${tbtn(reportPeriod === 'month')}">月報</button>
+            </div>
+            <button class="add-btn" data-action="hist-print">🖨️ 列印 / 另存 PDF</button>
+            <button class="add-btn" data-action="hist-sync">📊 同步到 Google Sheet</button>
+          </div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">營收／訂單／品項為真實歷史資料；成本／薪資／食材／設備為本月或目前設定值快照。</div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;">
+            <label style="font-size:12px;color:var(--ink-soft);white-space:nowrap;">Google Sheet 連結</label>
+            <input id="sheet-url" placeholder="貼上 Apps Script Web App 網址" value="${escapeHtml(cfg.sheetUrl || DEFAULT_SHEET_URL)}" style="flex:1;min-width:200px;border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;">
+            <button class="mini-btn" data-action="hist-save-sheet">儲存</button>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+          <div style="display:flex;gap:8px;">
+            <button data-action="hist-today" style="${tbtn(histScope === 'today')}">今日</button>
+            <button data-action="hist-all" style="${tbtn(histScope === 'all')}">全部</button>
+          </div>
+          <div style="font-size:14px;">營收：<b style="color:var(--green);">$${rev}</b> · 共 ${list.length} 筆</div>
+        </div>
+        <div class="admin-card">
+          ${list.length ? `<table class="hist-table"><thead><tr><th>單號</th><th>時間</th><th>類型 / 桌號</th><th>品項</th><th>狀態</th><th>付款</th><th style="text-align:right;">金額</th><th style="text-align:center;">操作</th></tr></thead><tbody>${rowsHtml}</tbody></table>` : '<div style="color:#9db4bf;padding:10px 0;">沒有訂單紀錄</div>'}
+        </div>`;
+    }
+
+    // ---------- 顧客回饋 ----------
+    // 星等評分題（要跟 feedback.html 的 RATINGS 對齊）
+    const FB_RATINGS = [
+      { key: 'overall', label: '整體', icon: '⭐' },
+      { key: 'taste',   label: '口味', icon: '😋' },
+      { key: 'speed',   label: '速度', icon: '⏱️' },
+      { key: 'service', label: '服務', icon: '🙋' },
+      { key: 'clean',   label: '整潔', icon: '🧼' },
+      { key: 'value',   label: '划算', icon: '💰' },
+    ];
+    const fbStars = n => { n = Math.round(n || 0); return '★★★★★'.slice(0, n) + '☆☆☆☆☆'.slice(0, 5 - n); };
+    const fbWeekAgo = () => Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+    // ---------- 公告管理 ----------
+    const ANN_TYPE_KEYS = ['info', 'warn', 'promo'];
+    const ANN_TA_STYLE = 'width:100%;min-height:88px;border:1.5px solid var(--line);border-radius:12px;padding:11px 14px;font:inherit;color:var(--ink);outline:none;box-sizing:border-box;resize:vertical;line-height:1.6;';
+    function annList() { return Array.isArray(cfg.announcements) ? cfg.announcements : []; }
+    // 寫回設定（跟菜單一樣：先更新本機鏡像 cfg，再整份存回雲端）
+    function commitAnn(list) { cfg = Object.assign({}, cfg, { announcements: list }); saveConfig(cfg); }
+    function annTypeChips(sel, action) {
+      return ANN_TYPE_KEYS.map(k => {
+        const s = ANNOUNCE_TYPES[k];
+        return `<button class="mini-btn" data-action="${action}" data-type="${k}"${k === sel ? ` style="border:none;background:${s.line};color:#fff;"` : ''}>${s.icon} ${s.label}</button>`;
+      }).join('');
+    }
+
+    function tabAnnounce() {
+      const list = annList();
+      const shown = list.filter(a => a.active !== false && String(a.text || '').trim()).length;
+
+      const rows = list.map((a, i) => {
+        if (annEdit && annEdit.id === a.id) {
+          return `<div class="admin-card" style="border:1.5px solid var(--pink);margin-bottom:8px;">
+            <textarea id="ann-edit-text" style="${ANN_TA_STYLE}">${escapeHtml(annEdit.text)}</textarea>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">${annTypeChips(annEdit.type, 'ann-edit-type')}</div>
+            <div style="display:flex;gap:8px;margin-top:12px;">
+              <button class="add-btn" data-action="ann-save">💾 儲存</button>
+              <button class="mini-btn" data-action="ann-cancel">取消</button>
+            </div>
+          </div>`;
+        }
+        const s = announceStyle(a.type);
+        const off = a.active === false;
+        return `<div class="ent-row" style="border-left:4px solid ${s.line};${off ? 'opacity:.5;' : ''}">
+          <div style="flex:1;min-width:200px;">
+            <div style="font-size:11px;font-weight:700;color:var(--ink-soft);margin-bottom:3px;">${s.icon} ${s.label}${off ? ' · 已隱藏' : ''}${a.createdAt ? ' · ' + fmtDate(a.createdAt) : ''}</div>
+            <div style="font-size:14px;font-weight:700;line-height:1.6;word-break:break-word;">${escapeHtml(a.text).replace(/\n/g, '<br>')}</div>
+          </div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap;">
+            <button class="mini-btn" data-action="ann-up" data-id="${escapeHtml(a.id)}"${i === 0 ? ' disabled style="opacity:.3;"' : ''}>↑</button>
+            <button class="mini-btn" data-action="ann-down" data-id="${escapeHtml(a.id)}"${i === list.length - 1 ? ' disabled style="opacity:.3;"' : ''}>↓</button>
+            <button class="mini-btn" data-action="ann-toggle" data-id="${escapeHtml(a.id)}">${off ? '👁 顯示' : '🚫 隱藏'}</button>
+            <button class="mini-btn" data-action="ann-edit" data-id="${escapeHtml(a.id)}">✎ 編輯</button>
+            <button class="mini-btn" data-action="ann-del" data-id="${escapeHtml(a.id)}" style="background:#fdecea;color:#e5534b;border:none;">🗑</button>
+          </div>
+        </div>`;
+      }).join('');
+
+      const preview = renderAnnouncementItems();
+
+      return `
+        <div class="admin-card">
+          <h3>➕ 新增公告</h3>
+          <textarea id="ann-text" placeholder="公告內容（可換行，例：本週六公休一天，敬請見諒）" style="${ANN_TA_STYLE}">${escapeHtml(annDraft.text)}</textarea>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;">
+            <span style="font-size:13px;font-weight:700;color:var(--ink-soft);">類型</span>
+            ${annTypeChips(annDraft.type, 'ann-type')}
+          </div>
+          <button class="add-btn" data-action="ann-add" style="margin-top:12px;">📢 新增公告</button>
+          <p style="font-size:12px;color:var(--ink-soft);margin:10px 0 0;line-height:1.7;">
+            新增後會立刻出現在<b>顧客手機點餐頁</b>與<b>店內點餐頁</b>的最上方。<br>
+            不想刪掉但暫時不想顯示，按「🚫 隱藏」即可；之後要再用按「👁 顯示」。
+          </p>
+        </div>
+
+        <div class="admin-card">
+          <h3>目前公告 · 共 ${list.length} 則（顧客看得到 ${shown} 則）</h3>
+          ${list.length ? rows : '<div style="color:#9db4bf;font-size:13px;">還沒有任何公告，用上面的欄位新增第一則吧</div>'}
+        </div>
+
+        <div class="admin-card">
+          <h3>👀 顧客看到的樣子</h3>
+          ${preview
+            ? `<div style="max-width:400px;border-radius:20px;overflow:hidden;box-shadow:0 6px 18px rgba(12,48,66,.18);">
+                 <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:linear-gradient(120deg,var(--ink-soft),#6fb7d0);color:#fff;">
+                   <span style="font-size:15px;font-weight:900;letter-spacing:2px;">📌 店家公告</span>
+                   <span style="width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.25);display:flex;align-items:center;justify-content:center;font-weight:900;">✕</span>
+                 </div>
+                 <div style="padding:14px;background:#fff;">${preview}</div>
+               </div>
+               <p style="font-size:12px;color:var(--ink-soft);margin:10px 0 0;line-height:1.7;">
+                 顧客點餐頁的標題列會出現「📢 店家公告」小按鈕（兩則以上會顯示數字），按下去就跳出上面這個懸浮視窗。
+               </p>`
+            : '<div style="color:#9db4bf;font-size:13px;">目前沒有顯示中的公告，顧客點餐頁不會出現公告按鈕</div>'}
+        </div>
+      `;
+    }
+
+    function tabFeedback() {
+      const pool = (fbScope === 'today' ? feedbacks.filter(f => isToday(f.createdAt))
+        : fbScope === 'week' ? feedbacks.filter(f => f.createdAt >= fbWeekAgo())
+        : feedbacks).slice().sort((a, b) => b.createdAt - a.createdAt);
+      const tbtn = on => `border-radius:999px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer;${on ? 'border:none;background:var(--ink);color:#fff;' : 'border:1.5px solid var(--line);background:#fff;color:var(--ink-soft);'}`;
+
+      // 各面向平均分（只計有評分的）
+      const avgOf = key => {
+        const vals = pool.map(f => (f.ratings && f.ratings[key]) || 0).filter(v => v > 0);
+        return vals.length ? (vals.reduce((s, v) => s + v, 0) / vals.length) : 0;
+      };
+      const overallAvg = avgOf('overall');
+
+      // 最喜歡餐點統計（跨所有回饋累計）
+      const favStat = {};
+      pool.forEach(f => (f.favorites || []).forEach(n => { favStat[n] = (favStat[n] || 0) + 1; }));
+      const favRank = Object.keys(favStat).map(name => ({ name, c: favStat[name] })).sort((a, b) => b.c - a.c);
+      const favMax = favRank.length ? favRank[0].c : 0;
+
+      // 再訪意願分佈
+      const revStat = {};
+      pool.forEach(f => { if (f.revisit) revStat[f.revisit] = (revStat[f.revisit] || 0) + 1; });
+
+      const avgCards = FB_RATINGS.map(r => {
+        const v = avgOf(r.key);
+        return `<div class="stat-card">
+          <div style="font-size:20px;font-weight:900;color:#f5b544;">${v ? v.toFixed(1) : '—'}<span style="font-size:12px;color:#dbe9f0;"> /5</span></div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">${r.icon} ${r.label}</div>
+        </div>`;
+      }).join('');
+
+      const favBars = favRank.length ? favRank.slice(0, 8).map(f => `
+        <div class="rank-row">
+          <div class="rank-head"><b>${escapeHtml(f.name)}</b><span style="color:var(--ink-soft);">${f.c} 票</span></div>
+          <div class="rank-track"><div class="rank-fill" style="width:${favMax ? Math.round(f.c / favMax * 100) : 0}%;"></div></div>
+        </div>`).join('') : '<div style="color:#9db4bf;">尚無資料</div>';
+
+      const revChips = Object.keys(revStat).length
+        ? Object.keys(revStat).sort((a, b) => revStat[b] - revStat[a]).map(k =>
+            `<span class="badge" style="background:var(--pink-bg);color:var(--pink-deep);">${escapeHtml(k)} · ${revStat[k]}</span>`).join(' ')
+        : '<span style="color:#9db4bf;">尚無資料</span>';
+
+      const rowsHtml = pool.map(f => {
+        const when = fmtDate(f.createdAt) + ' ' + fmtTime(f.createdAt);
+        const ratingCells = FB_RATINGS.map(r => {
+          const v = (f.ratings && f.ratings[r.key]) || 0;
+          return `<div title="${r.label}" style="font-size:12px;white-space:nowrap;"><span style="color:var(--ink-soft);">${r.icon}</span> <span style="color:#f5b544;">${v ? fbStars(v) : '—'}</span></div>`;
+        }).join('');
+        return `<tr>
+          <td style="white-space:nowrap;">${when}</td>
+          <td style="min-width:180px;">${ratingCells}</td>
+          <td style="font-size:12px;color:var(--ink-soft);max-width:220px;white-space:normal;line-height:1.5;">${(f.favorites && f.favorites.length) ? '🍽️ ' + escapeHtml(f.favorites.join('、')) : ''}${f.revisit ? `<div>💗 ${escapeHtml(f.revisit)}</div>` : ''}</td>
+          <td style="font-size:13px;max-width:300px;white-space:normal;line-height:1.6;">${f.comment ? escapeHtml(f.comment) : '<span style="color:#c8d6dd;">（無留言）</span>'}</td>
+          <td style="white-space:nowrap;font-size:13px;">${f.phone ? '📞 ' + escapeHtml(f.phone) : '<span style="color:#c8d6dd;">—</span>'}</td>
+          <td style="text-align:center;"><button class="mini-btn" data-action="fb-del" data-id="${escapeHtml(f.id)}" style="background:#fdecea;color:#e5534b;border:none;">🗑</button></td>
+        </tr>`;
+      }).join('');
+
+      return `
+        <div class="admin-cols" style="margin-bottom:14px;">
+          <div class="admin-card" style="text-align:center;">
+            <h3 style="margin:0 0 8px;">整體滿意度</h3>
+            <div style="font-size:44px;font-weight:900;color:#f5b544;line-height:1;">${overallAvg ? overallAvg.toFixed(1) : '—'}<span style="font-size:16px;color:#dbe9f0;"> /5</span></div>
+            <div style="font-size:24px;color:#f5b544;letter-spacing:3px;margin-top:4px;">${overallAvg ? fbStars(overallAvg) : '☆☆☆☆☆'}</div>
+            <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">共 ${pool.length} 份回饋</div>
+          </div>
+          <div class="admin-card">
+            <h3 style="margin:0 0 10px;">各面向平均</h3>
+            <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:0;">${avgCards}</div>
+          </div>
+        </div>
+        <div class="admin-cols" style="margin-bottom:14px;">
+          <div class="admin-card">
+            <h3 style="margin:0 0 12px;">🍽️ 最受歡迎餐點</h3>
+            ${favBars}
+          </div>
+          <div class="admin-card">
+            <h3 style="margin:0 0 12px;">💗 再訪／推薦意願</h3>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">${revChips}</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+          <div style="display:flex;gap:8px;">
+            <button data-action="fb-today" style="${tbtn(fbScope === 'today')}">今日</button>
+            <button data-action="fb-week" style="${tbtn(fbScope === 'week')}">近 7 天</button>
+            <button data-action="fb-all" style="${tbtn(fbScope === 'all')}">全部</button>
+          </div>
+          <div style="font-size:14px;">共 <b style="color:var(--pink-deep);">${pool.length}</b> 份留言</div>
+        </div>
+        <div class="admin-card">
+          ${pool.length ? `<div style="overflow-x:auto;"><table class="hist-table"><thead><tr><th>時間</th><th>評分</th><th>喜好 / 意願</th><th>留言</th><th>手機</th><th style="text-align:center;">操作</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>` : '<div style="color:#9db4bf;padding:10px 0;">目前還沒有顧客回饋。顧客可從點餐頁上方的「💬 點餐回饋表單」填寫。</div>'}
+        </div>`;
+    }
+
+    // ---------- 編輯彈窗 ----------
+    function fieldDefs(kind) {
+      if (kind === 'staff') return [{ key: 'name', label: '姓名', type: 'text' }, { key: 'role', label: '職務', type: 'text' }, { key: 'wage', label: '時薪', type: 'number' }, { key: 'hours', label: '本月時數', type: 'number' }];
+      if (kind === 'ingredient') return [{ key: 'name', label: '品名', type: 'text' }, { key: 'unit', label: '單位', type: 'text' }, { key: 'stock', label: '目前庫存', type: 'number' }, { key: 'lowAt', label: '安全庫存', type: 'number' }, { key: 'supplier', label: '供應商', type: 'text' }];
+      if (kind === 'equipment') return [{ key: 'name', label: '設備名稱', type: 'text' }, { key: 'lastService', label: '上次保養（例 2026/06/01）', type: 'text' }];
+      if (kind === 'cost') return [{ key: 'label', label: '成本項目', type: 'text' }, { key: 'amount', label: '本月金額', type: 'number' }];
+      return [];
+    }
+    const entListKey = kind => kind === 'staff' ? 'staff' : kind === 'ingredient' ? 'ingredients' : kind === 'equipment' ? 'equipment' : 'costs';
+
+    function renderModals() {
+      let html = '';
+      if (editItem) {
+        html += `
+          <div class="pin-overlay"><div class="pin-box" style="max-width:320px;">
+            <h3 style="font-size:17px;font-weight:900;margin:0 0 14px;">${editItem.isNew ? '新增品項' : '編輯品項'}</h3>
+            <input id="item-name" placeholder="品名" value="${escapeHtml(editItem.name || '')}" style="text-align:left;letter-spacing:normal;margin-bottom:8px;" />
+            <input id="item-price" type="number" placeholder="價格" value="${editItem.price != null ? editItem.price : ''}" style="text-align:left;letter-spacing:normal;" />
+            <textarea id="item-opts" placeholder="備註選項（一行一個，例：&#10;不要沙拉&#10;不要蕃茄醬）" style="width:100%;min-height:96px;margin-top:8px;border:1.5px solid var(--line);border-radius:12px;padding:11px 14px;font:inherit;color:var(--ink);outline:none;box-sizing:border-box;resize:vertical;text-align:left;letter-spacing:normal;">${escapeHtml(editItem.opts || '')}</textarea>
+            <div style="font-size:12px;color:var(--ink-soft);margin-top:4px;text-align:left;">顧客點此品項時可一鍵勾選；留空則用該分類預設選項。</div>
+            <div style="margin-top:12px;text-align:left;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+                <div style="font-size:12px;color:var(--ink-soft);font-weight:700;">💰 加價選項（後台記錄用，不影響顧客點餐與總價）</div>
+                <button class="mini-btn" data-action="addon-add" style="flex:none;">＋ 新增</button>
+              </div>
+              ${(editItem.addons || []).length ? (editItem.addons || []).map((ad, i) => `
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+                <span style="color:var(--pink);font-weight:900;">+$</span>
+                <input id="item-addon-price-${i}" type="number" placeholder="金額" value="${ad.price != null ? escapeHtml(String(ad.price)) : ''}" style="width:74px;flex:none;box-sizing:border-box;text-align:left;letter-spacing:normal;margin:0;" />
+                <input id="item-addon-name-${i}" placeholder="加價項目名稱（例：加蛋）" value="${escapeHtml(ad.name || '')}" style="flex:1;width:auto;box-sizing:border-box;text-align:left;letter-spacing:normal;margin:0;" />
+                <button class="mini-btn" data-action="addon-del" data-idx="${i}" style="flex:none;">🗑</button>
+              </div>`).join('') : '<div style="font-size:12px;color:#9db4bf;padding:2px 0 4px;">尚無加價選項，按右上「＋ 新增」加入。</div>'}
+            </div>
+            <div id="item-autosave" style="font-size:12px;color:var(--green);font-weight:700;text-align:right;min-height:16px;margin-top:6px;">${autoSaveStatus === 'saving' ? '儲存中…' : autoSaveStatus === 'saved' ? '✓ 已自動儲存' : ''}</div>
+            <div class="pin-actions">
+              <button class="pill-button" style="flex:1;" data-action="item-cancel">${editItem.autoSaved ? '關閉' : '取消'}</button>
+              <button data-action="item-save" style="flex:1;border:none;background:var(--pink);color:#fff;font-weight:900;padding:11px;border-radius:12px;">儲存</button>
+            </div>
+          </div></div>`;
+      }
+      if (editEnt) {
+        const defs = fieldDefs(editEnt.kind);
+        const kindLabel = { staff: '員工', ingredient: '食材', equipment: '設備', cost: '成本項目' }[editEnt.kind] || '';
+        html += `
+          <div class="pin-overlay"><div class="pin-box" style="max-width:360px;">
+            <h3 style="font-size:17px;font-weight:900;margin:0 0 14px;">${editEnt.isNew ? '新增' : '編輯'}${kindLabel}</h3>
+            ${defs.map(d => `<input id="ent-${d.key}" type="${d.type === 'number' ? 'number' : 'text'}" placeholder="${d.label}" value="${escapeHtml(editEnt.data[d.key] != null ? String(editEnt.data[d.key]) : '')}" style="text-align:left;letter-spacing:normal;margin-bottom:8px;" />`).join('')}
+            <div id="ent-autosave" style="font-size:12px;color:var(--green);font-weight:700;text-align:right;min-height:16px;margin-top:6px;">${entAutoStatus === 'saving' ? '儲存中…' : entAutoStatus === 'saved' ? '✓ 已自動儲存' : ''}</div>
+            <div class="pin-actions">
+              <button class="pill-button" style="flex:1;" data-action="ent-cancel">${editEnt.autoSaved ? '關閉' : '取消'}</button>
+              <button data-action="ent-save" style="flex:1;border:none;background:var(--pink);color:#fff;font-weight:900;padding:11px;border-radius:12px;">儲存</button>
+            </div>
+          </div></div>`;
+      }
+      if (addonEdit) {
+        const inputStyle = 'text-align:left;letter-spacing:normal;margin:0;box-sizing:border-box;';
+        const opts = addonEdit.options || [];
+        html += `
+          <div class="pin-overlay"><div class="pin-box" style="max-width:380px;">
+            <h3 style="font-size:17px;font-weight:900;margin:0 0 14px;">${addonEdit.isNew ? '新增附加商品' : '編輯附加商品'}</h3>
+            <input id="ao-name" placeholder="商品名稱（例：鮮乳）" value="${escapeHtml(addonEdit.name || '')}" style="${inputStyle}margin-bottom:10px;" />
+            <div style="display:flex;align-items:center;gap:10px;text-align:left;">
+              ${addonThumb(addonEdit.img, 64)}
+              <div style="min-width:0;flex:1;">
+                <input id="ao-file" type="file" accept="image/*" style="display:none;">
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                  <button class="mini-btn" data-action="ao-pick"${addonUploading ? ' disabled style="opacity:.5;"' : ''}>${addonUploading ? '⏳ 上傳中…' : (addonEdit.img ? '🔄 換一張圖片' : '📷 選擇圖片上傳')}</button>
+                  ${addonEdit.img && !addonUploading ? '<button class="mini-btn" data-action="ao-img-clear">移除圖片</button>' : ''}
+                </div>
+                <div style="font-size:11px;color:var(--ink-soft);margin-top:6px;line-height:1.6;">
+                  ${addonUploading ? '正在傳到 Cloudinary，請稍候…' : '選手機相簿或電腦裡的圖片即可，會自動縮圖後上傳。'}
+                </div>
+              </div>
+            </div>
+            <input id="ao-img" placeholder="或直接貼圖片網址（https://…）" value="${escapeHtml(addonEdit.img || '')}" style="${inputStyle}margin-top:10px;font-size:12px;" />
+            <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;text-align:left;">貼網址的話，按一下<button class="mini-btn" data-action="ao-preview" style="padding:2px 8px;font-size:11px;margin:0 2px;">更新預覽</button>可先看效果。</div>
+            <div style="margin-top:14px;text-align:left;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+                <div style="font-size:12px;color:var(--ink-soft);font-weight:700;">📦 規格與售價（至少一組；兩組以上顧客可切換）</div>
+                <button class="mini-btn" data-action="ao-opt-add" style="flex:none;">＋ 新增</button>
+              </div>
+              ${opts.length ? opts.map((op, i) => `
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+                <input id="ao-opt-label-${i}" placeholder="規格（例：900ml罐）" value="${escapeHtml(op.label || '')}" style="${inputStyle}flex:1;width:auto;" />
+                <input id="ao-opt-price-${i}" type="number" placeholder="售價" value="${op.price != null ? escapeHtml(String(op.price)) : ''}" style="${inputStyle}width:72px;flex:none;" />
+                <input id="ao-opt-orig-${i}" type="number" placeholder="原價" value="${op.orig != null ? escapeHtml(String(op.orig)) : ''}" style="${inputStyle}width:72px;flex:none;" />
+                <button class="mini-btn" data-action="ao-opt-del" data-idx="${i}" style="flex:none;">🗑</button>
+              </div>`).join('') : '<div style="font-size:12px;color:#9db4bf;padding:2px 0 4px;">尚無規格，按右上「＋ 新增」加入。</div>'}
+              <div style="font-size:12px;color:var(--ink-soft);">「原價」可留空；有填會在顧客端顯示刪除線特價。</div>
+            </div>
+            <div class="pin-actions">
+              <button class="pill-button" style="flex:1;" data-action="ao-cancel">取消</button>
+              <button data-action="ao-save" style="flex:1;border:none;background:var(--pink);color:#fff;font-weight:900;padding:11px;border-radius:12px;">儲存</button>
+            </div>
+          </div></div>`;
+      }
+      return html;
+    }
+
+    // ---------- 主渲染 ----------
+    function renderAdmin() {
+      // 記住捲動位置：整頁垂直 + 分頁橫桿(.admin-tabs)的橫向捲動，重建 DOM 後還原，避免點擊後跳回最前面
+      const _scrollY = window.scrollY;
+      const _tabsBar = app.querySelector('.admin-tabs');
+      const _tabsLeft = _tabsBar ? _tabsBar.scrollLeft : 0;
+      // 記住焦點欄位與游標位置：自動儲存會觸發雲端快照而重繪，
+      // 沒有還原的話打字打到一半游標會跳掉
+      const _act = document.activeElement;
+      const _focusId = _act && _act.id ? _act.id : null;
+      const _caret = _act && typeof _act.selectionStart === 'number' ? _act.selectionStart : null;
+      const bodyFns = { revenue: tabRevenue, ops: tabOps, cost: tabCost, payroll: tabPayroll, ing: tabIng, equip: tabEquip, menu: tabMenu, addons: tabAddons, history: tabHistory, feedback: tabFeedback, announce: tabAnnounce };
+      app.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+          <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);">📊 ${syncModeLabel()} · 自動更新</div>
+          <button id="logout-btn" class="pill-button">🔓 登出</button>
+        </div>
+        <div class="admin-tabs">${ADMIN_TABS.map(t => `<button class="admin-tab${t.k === aTab ? ' active' : ''}" data-tab="${t.k}">${t.label}</button>`).join('')}</div>
+        ${(bodyFns[aTab] || tabRevenue)()}
+        ${renderModals()}
+      `;
+      bindAdmin();
+      const _newTabsBar = app.querySelector('.admin-tabs');
+      if (_newTabsBar) _newTabsBar.scrollLeft = _tabsLeft;
+      window.scrollTo(0, _scrollY);
+      if (_focusId) {
+        const el = document.getElementById(_focusId);
+        if (el) {
+          el.focus();
+          if (_caret != null && typeof el.setSelectionRange === 'function') {
+            try { el.setSelectionRange(_caret, _caret); } catch (e) {}
+          }
+        }
+      }
+    }
+
+    function bindAdmin() {
+      const logout = document.getElementById('logout-btn');
+      if (logout) logout.addEventListener('click', () => { unlocked = false; try { localStorage.removeItem(ADMIN_AUTH_KEY); } catch (e) {} renderLogin(); });
+      app.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { aTab = b.dataset.tab; renderAdmin(); }));
+      app.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => handleAction(b)));
+      // 營運資料彈窗（員工/食材/設備/成本）：欄位變動即排程自動儲存
+      if (editEnt) {
+        fieldDefs(editEnt.kind).forEach(d => {
+          const el = document.getElementById('ent-' + d.key);
+          if (el) el.addEventListener('input', scheduleEntAutoSave);
+        });
+      }
+      // 結單時間與開關：改完立刻存（下拉/勾選不需要延遲）
+      ['close-time', 'close-enabled'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('change', () => {
+          if (!isConfigLoaded()) { showMessage('⚠️ 雲端資料尚未載入完成，請稍候再操作'); return; }
+          const t = document.getElementById('close-time'), en = document.getElementById('close-enabled');
+          cfg = Object.assign({}, cfg, { closeTime: (t && t.value) || '11:50', closeEnabled: !!(en && en.checked) });
+          saveConfig(cfg);
+          showMessage(cfg.closeEnabled ? ('已自動儲存，結單時間：' + cfg.closeTime) : '已自動儲存，結單暫停（測試模式）');
+        });
+      });
+      // Google Sheet 連結：停止輸入約 1.2 秒自動存
+      const _su = document.getElementById('sheet-url');
+      if (_su) _su.addEventListener('input', () => {
+        if (sheetSaveTimer) clearTimeout(sheetSaveTimer);
+        sheetSaveTimer = setTimeout(() => {
+          sheetSaveTimer = null;
+          if (!isConfigLoaded()) return;
+          const el = document.getElementById('sheet-url');
+          if (!el) return;
+          cfg = Object.assign({}, cfg, { sheetUrl: el.value.trim() });
+          saveConfig(cfg);
+          showMessage('已自動儲存 Google Sheet 連結');
+        }, 1200);
+      });
+      // 公告輸入框：邊打邊存進暫存，雲端快照觸發重繪也不會把字弄丟
+      const _annT = document.getElementById('ann-text');
+      if (_annT) _annT.addEventListener('input', () => { annDraft.text = _annT.value; });
+      const _annE = document.getElementById('ann-edit-text');
+      if (_annE) _annE.addEventListener('input', () => { if (annEdit) annEdit.text = _annE.value; });
+      // 附加商品彈窗：選好圖片就直接上傳到 Cloudinary
+      const _aoFile = document.getElementById('ao-file');
+      if (_aoFile) _aoFile.addEventListener('change', () => {
+        const f = _aoFile.files && _aoFile.files[0];
+        _aoFile.value = ''; // 清掉才能連續選同一張重傳
+        if (f) uploadAddonImage(f);
+      });
+      // 品項彈窗：任何欄位變動都排程一次自動儲存
+      if (editItem) {
+        const ids = ['item-name', 'item-price', 'item-opts'];
+        (editItem.addons || []).forEach((_, i) => ids.push('item-addon-name-' + i, 'item-addon-price-' + i));
+        ids.forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('input', scheduleAutoSave); });
+      }
+    }
+
+    // 會寫入設定的動作；雲端資料還沒載入完就執行會用預設值覆蓋掉雲端真實資料
+    const WRITE_ACTIONS = [
+      // → saveMenu
+      'item-save', 'item-del', 'item-active', 'item-sold', 'cat-add', 'cat-del', 'cat-rename', 'cat-visible', 'cat-publish', 'menu-reset-default',
+      // → saveEnt
+      'ent-save', 'ent-del', 'ing-plus', 'ing-minus', 'eq-cycle',
+      // → saveConfig
+      'save-close-time', 'hist-save-sheet', 'ao-cloud-save',
+      // → 公告（也是寫進 config）
+      'ann-add', 'ann-del', 'ann-toggle', 'ann-up', 'ann-down', 'ann-save',
+    ];
+    // 附加商品寫入 config/addons 的動作（跟 cfg 無關，另外用 addonLoaded 把關）
+    const AO_WRITE_ACTIONS = ['ao-save', 'ao-del', 'ao-active', 'ao-up', 'ao-down'];
+
+    function handleAction(b) {
+      const a = b.dataset.action;
+      const cat = b.dataset.cat, id = b.dataset.id, kind = b.dataset.kind;
+      if (WRITE_ACTIONS.indexOf(a) !== -1 && !isConfigLoaded()) {
+        showMessage('⚠️ 雲端資料尚未載入完成，請稍候再操作（避免覆蓋既有資料）');
+        return;
+      }
+      // 附加商品寫入雲端前，也要等雲端載入完成（否則會用空清單蓋掉既有商品）
+      if (AO_WRITE_ACTIONS.indexOf(a) !== -1 && !addonLoaded) {
+        showMessage('⚠️ 雲端資料尚未載入完成，請稍候再操作（避免覆蓋既有資料）');
+        return;
+      }
+      // 公告的任何動作都會重繪，先把輸入框裡打到一半的字收起來
+      if (a.indexOf('ann-') === 0) captureAnnInputs();
+      // 附加商品彈窗的任何動作都會重繪，先把打到一半的字收回暫存
+      if (a.indexOf('ao-') === 0) captureAddonModal();
+      if (a === 'hist-today') { histScope = 'today'; renderAdmin(); }
+      else if (a === 'hist-all') { histScope = 'all'; renderAdmin(); }
+      else if (a === 'hist-del') { if (confirm('確定刪除這筆訂單？此動作無法復原，且會從雲端同步移除。')) syncDeleteOrder(id); }
+      else if (a === 'fb-today') { fbScope = 'today'; renderAdmin(); }
+      else if (a === 'fb-week') { fbScope = 'week'; renderAdmin(); }
+      else if (a === 'fb-all') { fbScope = 'all'; renderAdmin(); }
+      else if (a === 'fb-del') { if (confirm('確定刪除這筆顧客回饋？此動作無法復原，且會從雲端同步移除。')) deleteFeedback(id); }
+      else if (a === 'rpt-day') { reportPeriod = 'day'; renderAdmin(); }
+      else if (a === 'rpt-week') { reportPeriod = 'week'; renderAdmin(); }
+      else if (a === 'rpt-month') { reportPeriod = 'month'; renderAdmin(); }
+      else if (a === 'hist-print') { const el = document.getElementById('hist-date'); printDayReport(el ? el.value : ''); }
+      else if (a === 'hist-sync') { const el = document.getElementById('hist-date'); syncDayToSheet(el ? el.value : ''); }
+      else if (a === 'hist-save-sheet') { const el = document.getElementById('sheet-url'); cfg = Object.assign({}, cfg, { sheetUrl: el ? el.value.trim() : '' }); saveConfig(cfg); showMessage('已儲存 Google Sheet 連結'); }
+      else if (a === 'save-close-time') { const el = document.getElementById('close-time'); const en = document.getElementById('close-enabled'); cfg = Object.assign({}, cfg, { closeTime: (el && el.value) || '11:50', closeEnabled: !!(en && en.checked) }); saveConfig(cfg); showMessage(cfg.closeEnabled ? ('已啟用結單時間：' + cfg.closeTime) : '已暫停結單（測試模式）'); }
+      else if (a === 'menu-reset-default') { resetMenuToDefault(); }
+      else if (a === 'cat-add') { addCategory(); }
+      else if (a === 'cat-rename') { renameCategory(cat); }
+      else if (a === 'cat-visible') { toggleCategoryVisible(cat); }
+      else if (a === 'cat-publish') { publishCategory(cat); }
+      else if (a === 'cat-del') { deleteCategory(cat); }
+      else if (a === 'item-active') { toggleItem(cat, id, 'active'); }
+      else if (a === 'item-sold') { toggleItem(cat, id, 'soldOut'); }
+      else if (a === 'item-del') { if (confirm('確定刪除此品項？')) deleteItem(cat, id); }
+      else if (a === 'item-edit') { const it = findItem(cat, id); editItem = { catId: cat, id, name: it.name, price: it.price, opts: (it.opts || []).join('\n'), addons: loadAddons(it), isNew: false }; autoSaveStatus = ''; renderAdmin(); }
+      else if (a === 'item-add') { editItem = { catId: cat, name: '', price: '', opts: '', addons: [], isNew: true }; autoSaveStatus = ''; renderAdmin(); }
+      else if (a === 'addon-add') { captureItemModal(); editItem.addons = [...(editItem.addons || []), { name: '', price: '' }]; renderAdmin(); }
+      else if (a === 'addon-del') { captureItemModal(); const ix = parseInt(b.dataset.idx, 10); editItem.addons = (editItem.addons || []).filter((_, i) => i !== ix); renderAdmin(); scheduleAutoSave(); }
+      else if (a === 'item-cancel') { if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null; } editItem = null; autoSaveStatus = ''; renderAdmin(); }
+      else if (a === 'item-save') { saveItem(); }
+      else if (a === 'ent-add') { entAutoStatus = ''; openEnt(kind, null); }
+      else if (a === 'ent-edit') { entAutoStatus = ''; openEnt(kind, id); }
+      else if (a === 'ent-del') { if (confirm('確定刪除？')) deleteEnt(kind, id); }
+      else if (a === 'ent-cancel') { if (entSaveTimer) { clearTimeout(entSaveTimer); entSaveTimer = null; } editEnt = null; entAutoStatus = ''; renderAdmin(); }
+      else if (a === 'ent-save') { commitEnt(); }
+      else if (a === 'eq-cycle') { cycleStatus(id); }
+      else if (a === 'ing-plus') { adjustStock(id, 1); }
+      else if (a === 'ing-minus') { adjustStock(id, -1); }
+      else if (a === 'ann-type') { annDraft.type = b.dataset.type; renderAdmin(); }
+      else if (a === 'ann-add') { addAnnouncement(); }
+      else if (a === 'ann-edit') { const it = annList().find(x => x.id === id); if (it) { annEdit = { id: it.id, text: it.text || '', type: it.type || 'info' }; renderAdmin(); } }
+      else if (a === 'ann-edit-type') { if (annEdit) { annEdit.type = b.dataset.type; renderAdmin(); } }
+      else if (a === 'ann-cancel') { annEdit = null; renderAdmin(); }
+      else if (a === 'ann-save') { saveAnnouncementEdit(); }
+      else if (a === 'ann-toggle') { updateAnnouncement(id, it => Object.assign({}, it, { active: it.active === false })); }
+      else if (a === 'ann-del') { if (confirm('確定刪除這則公告？此動作無法復原。')) { commitAnn(annList().filter(x => x.id !== id)); renderAdmin(); showMessage('已刪除公告'); } }
+      else if (a === 'ann-up') { moveAnnouncement(id, -1); }
+      else if (a === 'ann-down') { moveAnnouncement(id, 1); }
+      else if (a === 'ao-add') { addonEdit = { isNew: true, name: '', img: '', active: true, options: [{ label: '', price: '', orig: '' }] }; renderAdmin(); }
+      else if (a === 'ao-edit') { openAddonEdit(parseInt(b.dataset.idx, 10)); }
+      else if (a === 'ao-preview') { renderAdmin(); }
+      else if (a === 'ao-pick') { const f = document.getElementById('ao-file'); if (f) f.click(); }
+      else if (a === 'ao-img-clear') { addonEdit.img = ''; renderAdmin(); }
+      else if (a === 'ao-cloud-save') { saveCloudSettings(); }
+      else if (a === 'ao-opt-add') { addonEdit.options = [...(addonEdit.options || []), { label: '', price: '', orig: '' }]; renderAdmin(); }
+      else if (a === 'ao-opt-del') { const ix = parseInt(b.dataset.idx, 10); addonEdit.options = (addonEdit.options || []).filter((_, i) => i !== ix); renderAdmin(); }
+      else if (a === 'ao-cancel') { addonEdit = null; renderAdmin(); }
+      else if (a === 'ao-save') { saveAddonEdit(); }
+      else if (a === 'ao-active') { toggleAddon(parseInt(b.dataset.idx, 10)); }
+      else if (a === 'ao-del') { deleteAddon(parseInt(b.dataset.idx, 10)); }
+      else if (a === 'ao-up') { moveAddon(parseInt(b.dataset.idx, 10), -1); }
+      else if (a === 'ao-down') { moveAddon(parseInt(b.dataset.idx, 10), 1); }
+    }
+
+    // ---------- 附加商品操作 ----------
+    // 重繪會重建 innerHTML，先把輸入框現值收回暫存，打到一半的字才不會不見
+    function captureAddonModal() {
+      if (!addonEdit) return;
+      const n = document.getElementById('ao-name');
+      if (n) addonEdit.name = n.value;
+      const g = document.getElementById('ao-img');
+      if (g) addonEdit.img = g.value;
+      (addonEdit.options || []).forEach((op, i) => {
+        const l = document.getElementById('ao-opt-label-' + i);
+        const p = document.getElementById('ao-opt-price-' + i);
+        const o = document.getElementById('ao-opt-orig-' + i);
+        if (l) op.label = l.value;
+        if (p) op.price = p.value;
+        if (o) op.orig = o.value;
+      });
+    }
+
+    function openAddonEdit(idx) {
+      const a = addonList[idx];
+      if (!a) return;
+      addonEdit = {
+        isNew: false, idx, id: a.id, name: a.name || '', img: a.img || '', active: a.active !== false,
+        options: (Array.isArray(a.options) ? a.options : []).map(op => ({
+          id: op.id, label: op.label || '', price: op.price != null ? op.price : '', orig: op.orig != null ? op.orig : '',
+        })),
+      };
+      renderAdmin();
+    }
+
+    function saveAddonEdit() {
+      if (!addonEdit) return;
+      const name = (addonEdit.name || '').trim();
+      const options = (addonEdit.options || []).map((op, i) => {
+        const price = parseInt(op.price, 10);
+        const orig = parseInt(op.orig, 10);
+        const rec = { id: op.id || ('o' + Date.now().toString(36) + i), label: (op.label || '').trim(), price };
+        if (!isNaN(orig) && orig > 0) rec.orig = orig;
+        return rec;
+      }).filter(op => !isNaN(op.price) && op.price >= 0);
+      if (!name) { showMessage('請填寫商品名稱'); return; }
+      if (!options.length) { showMessage('請至少填一組規格的售價'); return; }
+      const rec = {
+        id: addonEdit.id || ('addon-' + Date.now().toString(36)),
+        name, img: (addonEdit.img || '').trim(), active: addonEdit.active !== false, options,
+      };
+      const isNew = !!addonEdit.isNew;
+      const list = isNew ? addonList.concat([rec]) : addonList.map((x, i) => i === addonEdit.idx ? rec : x);
+      addonEdit = null;
+      commitAddons(list, isNew ? '✅ 已新增，顧客點餐頁馬上看得到' : '✅ 已儲存，顧客點餐頁馬上更新');
+    }
+
+    function toggleAddon(idx) {
+      const a = addonList[idx];
+      if (!a) return;
+      commitAddons(addonList.map((x, i) => i !== idx ? x : Object.assign({}, x, { active: x.active === false })),
+        a.active === false ? '已上架，顧客看得到了' : '已下架，顧客暫時看不到');
+    }
+
+    function deleteAddon(idx) {
+      const a = addonList[idx];
+      if (!a) return;
+      if (!confirm('確定刪除附加商品「' + (a.name || '') + '」？\n刪除後顧客點餐頁就不會再出現，此動作無法復原。')) return;
+      commitAddons(addonList.filter((_, i) => i !== idx), '已刪除');
+    }
+
+    function moveAddon(idx, dir) {
+      const list = addonList.slice();
+      const j = idx + dir;
+      if (idx < 0 || j < 0 || j >= list.length) return;
+      const tmp = list[idx]; list[idx] = list[j]; list[j] = tmp;
+      commitAddons(list, '');
+    }
+
+    // ---------- 圖片上傳 ----------
+    function saveCloudSettings() {
+      const n = document.getElementById('cloud-name');
+      const p = document.getElementById('cloud-preset');
+      cfg = Object.assign({}, cfg, {
+        cloudinary: { cloud: (n ? n.value : '').trim() || CLOUDINARY_DEFAULT_CLOUD, preset: (p ? p.value : '').trim() },
+      });
+      saveConfig(cfg);
+      renderAdmin();
+      showMessage(cloudConf().preset ? '✅ 已儲存，現在可以直接上傳圖片了' : '已儲存（尚未填上傳預設，仍只能貼網址）');
+    }
+
+    // 上傳前先縮圖：手機照片動輒 3～5MB，縮到最長邊 900px 顧客端載得快、也省 Cloudinary 空間
+    function shrinkImage(file) {
+      return new Promise(resolve => {
+        if (!file.type || file.type.indexOf('image/') !== 0 || typeof createImageBitmap !== 'function') { resolve(file); return; }
+        createImageBitmap(file).then(bmp => {
+          const long = Math.max(bmp.width, bmp.height);
+          const scale = Math.min(1, CLOUDINARY_MAX_PX / long);
+          if (scale === 1 && file.size < 800 * 1024) { if (bmp.close) bmp.close(); resolve(file); return; }
+          const w = Math.max(1, Math.round(bmp.width * scale));
+          const h = Math.max(1, Math.round(bmp.height * scale));
+          const cv = document.createElement('canvas');
+          cv.width = w; cv.height = h;
+          const ctx = cv.getContext('2d');
+          ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); // 透明底轉 JPEG 會變黑，先鋪白底
+          ctx.drawImage(bmp, 0, 0, w, h);
+          if (bmp.close) bmp.close();
+          cv.toBlob(blob => resolve(blob || file), 'image/jpeg', 0.85);
+        }).catch(() => resolve(file)); // HEIC 之類瀏覽器解不開的，直接原檔上傳讓 Cloudinary 轉
+      });
+    }
+
+    function uploadAddonImage(file) {
+      if (!file || !addonEdit) return;
+      const conf = cloudConf();
+      if (!conf.preset) { showMessage('⚠️ 請先在上方「圖片上傳設定」填入 Cloudinary 的上傳預設（upload preset）'); return; }
+      if (file.size > 20 * 1024 * 1024) { showMessage('⚠️ 圖片太大（超過 20MB），請先壓縮或改選別張'); return; }
+      captureAddonModal(); // 先把打到一半的名稱／價格收起來，重繪才不會不見
+      addonUploading = true;
+      renderAdmin();
+      shrinkImage(file).then(blob => {
+        const fd = new FormData();
+        fd.append('file', blob);
+        fd.append('upload_preset', conf.preset);
+        fd.append('folder', CLOUDINARY_FOLDER);
+        return fetch('https://api.cloudinary.com/v1_1/' + encodeURIComponent(conf.cloud) + '/image/upload', { method: 'POST', body: fd })
+          .then(res => res.json().catch(() => ({})).then(json => ({ ok: res.ok, json })));
+      }).then(r => {
+        if (!r.ok || !r.json || !r.json.secure_url) {
+          throw new Error((r.json && r.json.error && r.json.error.message) || '上傳失敗');
+        }
+        addonUploading = false;
+        if (addonEdit) addonEdit.img = r.json.secure_url;
+        renderAdmin();
+        showMessage('✅ 圖片已上傳');
+      }).catch(e => {
+        console.warn('圖片上傳失敗', e);
+        addonUploading = false;
+        renderAdmin();
+        showMessage('⚠️ 圖片上傳失敗：' + (e && e.message ? e.message : '請檢查網路與上傳預設設定'));
+      });
+    }
+
+    // 整份寫回雲端 config/addons（跟菜單一樣先更新本機鏡像，快照回來會再校正一次）
+    function commitAddons(list, msg) {
+      addonList = list;
+      addonSeeded = false; // 一旦存過，就完全以後台設定為準
+      const db = ensureDb();
+      if (db) {
+        db.collection('config').doc('addons').set({ list, updatedAt: Date.now() })
+          .then(() => { if (msg) showMessage(msg); })
+          .catch(e => { console.warn('附加商品儲存失敗', e); showMessage('⚠️ 雲端儲存失敗，請檢查網路或 Firestore 規則是否允許寫入 config/addons'); });
+      } else {
+        try { localStorage.setItem('xyg-addons', JSON.stringify(list)); } catch (e) {}
+        showMessage('⚠️ 目前離線，已暫存本機；連上網後請再存一次');
+      }
+      renderAdmin();
+    }
+
+    // ---------- 公告操作 ----------
+    // 重繪會重建 innerHTML，先把輸入框現值收回暫存，打到一半的字才不會不見
+    function captureAnnInputs() {
+      const el = document.getElementById('ann-text');
+      if (el) annDraft.text = el.value;
+      const ed = document.getElementById('ann-edit-text');
+      if (ed && annEdit) annEdit.text = ed.value;
+    }
+    function addAnnouncement() {
+      const text = (annDraft.text || '').trim();
+      if (!text) { showMessage('請先輸入公告內容'); return; }
+      // id 要帶隨機碼：只用時間戳的話連續新增可能撞號，之後隱藏／編輯會一次動到兩則
+      const id = 'an' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      const item = { id, text, type: annDraft.type || 'info', active: true, createdAt: Date.now() };
+      commitAnn([item, ...annList()]); // 新公告排最上面
+      annDraft = { text: '', type: 'info' };
+      renderAdmin();
+      showMessage('✅ 已新增公告，顧客點餐頁馬上看得到');
+    }
+    function saveAnnouncementEdit() {
+      if (!annEdit) return;
+      const text = (annEdit.text || '').trim();
+      if (!text) { showMessage('公告內容不可空白'); return; }
+      const type = annEdit.type || 'info';
+      commitAnn(annList().map(x => x.id !== annEdit.id ? x : Object.assign({}, x, { text, type })));
+      annEdit = null;
+      renderAdmin();
+      showMessage('已更新公告');
+    }
+    function updateAnnouncement(id, fn) {
+      commitAnn(annList().map(x => x.id !== id ? x : fn(x)));
+      renderAdmin();
+    }
+    function moveAnnouncement(id, dir) {
+      const list = annList().slice();
+      const i = list.findIndex(x => x.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= list.length) return;
+      const tmp = list[i]; list[i] = list[j]; list[j] = tmp;
+      commitAnn(list);
+      renderAdmin();
+    }
+
+    // ---------- 菜單操作 ----------
+    function resetMenuToDefault() {
+      if (!confirm('確定要「重設成程式預設菜單」嗎？\n\n會用程式內建的預設菜單（含最新完整品名）覆蓋掉目前雲端的菜單設定。\n你手動新增／改名／改價／下架售完的設定都會被清掉，全部品項恢復上架、不售完。\n此動作無法復原。')) return;
+      // 從內建常數 MENU 重建（不是用 CURRENT_MENU，因為它可能已被雲端舊設定覆蓋）
+      const fresh = MENU.map(cat => Object.assign({}, JSON.parse(JSON.stringify(cat)), {
+        items: cat.items.map(it => Object.assign({ active: true, soldOut: false }, JSON.parse(JSON.stringify(it)))),
+      }));
+      cfg.menu = fresh;
+      saveMenu(cfg.menu); renderAdmin();
+      showMessage('已重設成程式預設菜單');
+    }
+    function addCategory() {
+      const name = (prompt('新增大類名稱（例：三明治系列）') || '').trim();
+      if (!name) return;
+      const icon = (prompt('分類圖示 emoji（可留空，預設 🍽️）', '🥪') || '🍽️').trim() || '🍽️';
+      const nid = 'cat' + Date.now();
+      cfg.menu = [...cfg.menu, { id: nid, name, icon, items: [] }];
+      saveMenu(cfg.menu); renderAdmin();
+    }
+
+
+    // 顧客點餐頁實際看得到幾個品項（分類隱藏或品項下架都不算）
+    function custCount(cat) {
+      if (isHiddenForCustomer(cat)) return 0;
+      return (cat.items || []).filter(it => it.active !== false).length;
+    }
+    // 一鍵送出到顧客點餐頁：分類設為顧客可見，並把該分類所有品項上架
+    function publishCategory(catId) {
+      const c = cfg.menu.find(x => x.id === catId);
+      if (!c) return;
+      const n = (c.items || []).length;
+      if (!n) { showMessage('這個分類還沒有品項，請先新增品項'); return; }
+      cfg.menu = cfg.menu.map(x => x.id !== catId ? x
+        : Object.assign({}, x, { hidden: false, items: x.items.map(it => Object.assign({}, it, { active: true })) }));
+      saveMenu(cfg.menu);
+      showMessage('✅ 已送出，顧客現在看得到「' + c.name + '」的 ' + n + ' 個品項');
+      renderAdmin();
+    }
+    // 切換分類是否顯示在顧客點餐頁（廚房/收銀/後台一律看得到，不受影響）
+    function toggleCategoryVisible(catId) {
+      const c = cfg.menu.find(x => x.id === catId);
+      if (!c) return;
+      const next = !isHiddenForCustomer(c); // 目前可見 → 切成隱藏，反之亦然
+      cfg.menu = cfg.menu.map(x => x.id !== catId ? x : Object.assign({}, x, { hidden: next }));
+      saveMenu(cfg.menu);
+      showMessage(next ? '已設為顧客看不到' : '已上架到顧客點餐頁');
+      renderAdmin();
+    }
+    function renameCategory(catId) {
+      const c = cfg.menu.find(x => x.id === catId); if (!c) return;
+      const name = prompt('修改大類名稱', c.name); if (name === null) return;
+      const icon = prompt('修改圖示 emoji', c.icon || '🍽️'); if (icon === null) return;
+      cfg.menu = cfg.menu.map(x => x.id !== catId ? x : Object.assign({}, x, { name: (name || '').trim() || x.name, icon: (icon || '').trim() || x.icon }));
+      saveMenu(cfg.menu); renderAdmin();
+    }
+    function deleteCategory(catId) {
+      const c = cfg.menu.find(x => x.id === catId); if (!c) return;
+      if (!confirm(`確定刪除大類「${c.name}」？\n其下 ${c.items.length} 個品項會一併刪除。`)) return;
+      cfg.menu = cfg.menu.filter(x => x.id !== catId);
+      saveMenu(cfg.menu); renderAdmin();
+    }
+    function findItem(catId, id) { const c = cfg.menu.find(x => x.id === catId); return c ? c.items.find(i => i.id === id) : null; }
+    function toggleItem(catId, id, field) {
+      cfg.menu = cfg.menu.map(c => c.id !== catId ? c : Object.assign({}, c, { items: c.items.map(i => i.id !== id ? i : Object.assign({}, i, { [field]: !i[field] })) }));
+      saveMenu(cfg.menu); renderAdmin();
+    }
+    function deleteItem(catId, id) {
+      cfg.menu = cfg.menu.map(c => c.id !== catId ? c : Object.assign({}, c, { items: c.items.filter(i => i.id !== id) }));
+      saveMenu(cfg.menu); renderAdmin();
+    }
+    // 讀取品項既有的加價選項；相容舊的 add5/add10/add15 欄位（自動轉成清單）
+    function loadAddons(it) {
+      let list = Array.isArray(it.addons) ? it.addons.map(a => ({ name: a.name || '', price: a.price != null ? a.price : '' })) : [];
+      if (!list.length) {
+        [['5', it.add5], ['10', it.add10], ['15', it.add15]].forEach(([p, nm]) => { if (nm) list.push({ name: nm, price: parseInt(p, 10) }); });
+      }
+      return list;
+    }
+    // 重建彈窗前，先把目前輸入框的值寫回 editItem，避免新增/刪除加價列時遺失
+    function captureItemModal() {
+      if (!editItem) return;
+      const n = document.getElementById('item-name'); if (n) editItem.name = n.value;
+      const p = document.getElementById('item-price'); if (p) editItem.price = p.value;
+      const o = document.getElementById('item-opts'); if (o) editItem.opts = o.value;
+      (editItem.addons || []).forEach((ad, i) => {
+        const nm = document.getElementById('item-addon-name-' + i);
+        const pr = document.getElementById('item-addon-price-' + i);
+        if (nm) ad.name = nm.value;
+        if (pr) ad.price = pr.value;
+      });
+    }
+    // 把彈窗目前內容寫進 cfg.menu；回傳 false = 品名或價格還沒填完，不動資料
+    function applyItemToMenu() {
+      captureItemModal();
+      const name = (editItem.name || '').trim();
+      const price = parseInt(editItem.price, 10);
+      if (!name || !(price >= 0)) return false;
+      const opts = (editItem.opts || '').split('\n').map(s => s.trim()).filter(Boolean);
+      // 只保留「有填名稱且金額為有效數字」的加價選項，空白列自動略過
+      const addons = (editItem.addons || []).map(a => ({ name: (a.name || '').trim(), price: parseInt(a.price, 10) })).filter(a => a.name && !isNaN(a.price) && a.price >= 0);
+      if (editItem.isNew) {
+        const nid = 'x' + Date.now();
+        editItem.id = nid;
+        editItem.isNew = false; // 已建立，之後改為「更新」，避免每次自動儲存都新增一筆
+        cfg.menu = cfg.menu.map(c => c.id !== editItem.catId ? c : Object.assign({}, c, { items: [...c.items, { id: nid, name, price, opts, addons, active: true, soldOut: false }] }));
+      } else {
+        cfg.menu = cfg.menu.map(c => c.id !== editItem.catId ? c : Object.assign({}, c, { items: c.items.map(i => i.id !== editItem.id ? i : Object.assign({}, i, { name, price, opts, addons })) }));
+      }
+      return true;
+    }
+
+    // ---------- 自動儲存：品名與價格都填好後，停止輸入約 1.2 秒就寫入雲端 ----------
+    let autoSaveTimer = null;
+    function setAutoStatus(s) {
+      autoSaveStatus = s;
+      const el = document.getElementById('item-autosave');
+      if (el) el.textContent = s === 'saving' ? '儲存中…' : s === 'saved' ? '✓ 已自動儲存' : '';
+    }
+    function scheduleAutoSave() {
+      captureItemModal(); // 先把輸入值收進 editItem，避免中途重繪遺失
+      if (autoSaveTimer) clearTimeout(autoSaveTimer);
+      autoSaveTimer = setTimeout(autoSaveItem, 1200);
+    }
+    function autoSaveItem() {
+      autoSaveTimer = null;
+      if (!editItem) return;
+      if (!isConfigLoaded()) return; // 雲端還沒載入完成，一律不寫入
+      if (!applyItemToMenu()) return; // 必填欄位還沒填完，安靜等待
+      editItem.autoSaved = true;
+      setAutoStatus('saving');
+      Promise.resolve(saveMenu(cfg.menu))
+        .then(() => setAutoStatus('saved'))
+        .catch(() => setAutoStatus(''));
+    }
+
+    function saveItem() {
+      if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null; }
+      if (!applyItemToMenu()) { showMessage('請填寫品名與價格'); return; }
+      editItem = null; autoSaveStatus = ''; saveMenu(cfg.menu); renderAdmin();
+    }
+
+    // ---------- 營運資料操作 ----------
+    function openEnt(kind, id) {
+      const data = {};
+      const item = id ? (cfg.ent[entListKey(kind)] || []).find(x => x.id === id) : null;
+      fieldDefs(kind).forEach(d => { data[d.key] = item ? item[d.key] : ''; });
+      editEnt = { kind, id: id || null, isNew: !item, data };
+      renderAdmin();
+    }
+    // 把營運資料彈窗的內容寫進 cfg.ent；回傳 false = 第一個必填欄位還沒填
+    function applyEntToCfg() {
+      const defs = fieldDefs(editEnt.kind); const rec = {};
+      for (const d of defs) {
+        const el = document.getElementById('ent-' + d.key);
+        if (!el) return false;
+        let v = el.value;
+        if (d.type === 'number') { v = parseFloat(v); if (isNaN(v)) v = 0; } else v = (v || '').trim();
+        rec[d.key] = v;
+      }
+      if (!rec[defs[0].key]) return false;
+      const lk = entListKey(editEnt.kind); const list = (cfg.ent[lk] || []).slice();
+      if (editEnt.isNew) {
+        rec.id = editEnt.kind + Date.now();
+        if (editEnt.kind === 'equipment') rec.status = '正常';
+        editEnt.id = rec.id;
+        editEnt.isNew = false; // 已建立，之後改為「更新」，避免每次自動儲存都新增一筆
+        list.push(rec);
+      } else {
+        const i = list.findIndex(x => x.id === editEnt.id); if (i >= 0) list[i] = Object.assign({}, list[i], rec);
+      }
+      cfg.ent = Object.assign({}, cfg.ent, { [lk]: list });
+      return true;
+    }
+
+    // ---------- 營運資料彈窗的自動儲存 ----------
+    let entSaveTimer = null;
+    let sheetSaveTimer = null;
+    function setEntStatus(s) {
+      entAutoStatus = s;
+      const el = document.getElementById('ent-autosave');
+      if (el) el.textContent = s === 'saving' ? '儲存中…' : s === 'saved' ? '✓ 已自動儲存' : '';
+    }
+    function scheduleEntAutoSave() {
+      if (entSaveTimer) clearTimeout(entSaveTimer);
+      entSaveTimer = setTimeout(autoSaveEnt, 1200);
+    }
+    function autoSaveEnt() {
+      entSaveTimer = null;
+      if (!editEnt) return;
+      if (!isConfigLoaded()) return; // 雲端還沒載入完成，一律不寫入
+      if (!applyEntToCfg()) return;  // 必填欄位還沒填完，安靜等待
+      editEnt.autoSaved = true;
+      setEntStatus('saving');
+      Promise.resolve(saveEnt(cfg.ent))
+        .then(() => setEntStatus('saved'))
+        .catch(() => setEntStatus(''));
+    }
+
+    function commitEnt() {
+      if (entSaveTimer) { clearTimeout(entSaveTimer); entSaveTimer = null; }
+      const defs = fieldDefs(editEnt.kind);
+      if (!applyEntToCfg()) { showMessage('請填寫' + defs[0].label); return; }
+      editEnt = null; entAutoStatus = ''; saveEnt(cfg.ent); renderAdmin();
+    }
+    function deleteEnt(kind, id) {
+      const lk = entListKey(kind);
+      cfg.ent = Object.assign({}, cfg.ent, { [lk]: (cfg.ent[lk] || []).filter(x => x.id !== id) });
+      saveEnt(cfg.ent); renderAdmin();
+    }
+    function cycleStatus(id) {
+      const order = ['正常', '保養中', '維修中'];
+      cfg.ent = Object.assign({}, cfg.ent, { equipment: (cfg.ent.equipment || []).map(x => x.id !== id ? x : Object.assign({}, x, { status: order[(order.indexOf(x.status) + 1) % 3] })) });
+      saveEnt(cfg.ent); renderAdmin();
+    }
+    function adjustStock(id, delta) {
+      cfg.ent = Object.assign({}, cfg.ent, { ingredients: (cfg.ent.ingredients || []).map(x => x.id !== id ? x : Object.assign({}, x, { stock: Math.max(0, (x.stock || 0) + delta) })) });
+      saveEnt(cfg.ent); renderAdmin();
+    }
+
+    // ---------- 啟動 ----------
+    try { unlocked = localStorage.getItem(ADMIN_AUTH_KEY) === '1'; } catch (e) { unlocked = false; }
+    if (unlocked) renderAdmin(); else renderLogin();
+
+    initSync(list => {
+      orders = list;
+      if (unlocked && !editItem && !editEnt && !addonEdit) renderAdmin();
+    });
+
+    initConfig(c => {
+      cfg = c;
+      if (unlocked && !editItem && !editEnt && !addonEdit) renderAdmin();
+    });
+
+    // ---------- 附加商品同步（Firestore config/addons，離線退回本機）----------
+    (function initAddonSync() {
+      const db = ensureDb();
+      if (!db) {
+        try { addonList = JSON.parse(localStorage.getItem('xyg-addons') || '[]'); } catch (e) {}
+        if (!addonList.length) { addonList = JSON.parse(JSON.stringify(DEFAULT_ADDONS)); addonSeeded = true; }
+        addonLoaded = true;
+        return;
+      }
+      db.collection('config').doc('addons').onSnapshot(
+        snap => {
+          const data = snap.exists ? snap.data() : null;
+          if (data && Array.isArray(data.list)) {
+            // 雲端已有文件 → 完全以雲端為準（就算清空也是店家自己刪的）
+            addonList = data.list;
+            addonSeeded = false;
+          } else {
+            // 雲端還沒建過這份文件 → 先顯示跟顧客端一致的預設商品，讓店家能直接編輯
+            addonList = JSON.parse(JSON.stringify(DEFAULT_ADDONS));
+            addonSeeded = true;
+          }
+          addonLoaded = true;
+          if (unlocked && aTab === 'addons' && !editItem && !editEnt && !addonEdit) renderAdmin();
+        },
+        err => {
+          console.warn('附加商品同步中斷', err);
+          if (!addonList.length) { addonList = JSON.parse(JSON.stringify(DEFAULT_ADDONS)); addonSeeded = true; }
+          addonLoaded = true;
+          if (unlocked && aTab === 'addons') renderAdmin();
+        }
+      );
+    })();
+
+    // ---------- 顧客回饋同步（Firestore feedback 集合，離線退回本機）----------
+    (function initFeedbackSync() {
+      const db = ensureDb();
+      if (db) {
+        db.collection('feedback').orderBy('createdAt', 'desc').onSnapshot(
+          snap => {
+            feedbacks = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+            if (unlocked && aTab === 'feedback' && !editItem && !editEnt) renderAdmin();
+          },
+          err => {
+            console.warn('回饋同步中斷，改讀本機', err);
+            try { feedbacks = JSON.parse(localStorage.getItem('xyg-feedback') || '[]'); } catch (e) {}
+            if (unlocked && aTab === 'feedback') renderAdmin();
+          }
+        );
+      } else {
+        try { feedbacks = JSON.parse(localStorage.getItem('xyg-feedback') || '[]'); } catch (e) {}
+      }
+    })();
+
+    function deleteFeedback(id) {
+      const db = ensureDb();
+      if (db) {
+        db.collection('feedback').doc(String(id)).delete()
+          .catch(e => console.warn('刪除回饋失敗', e));
+      } else {
+        feedbacks = feedbacks.filter(f => f.id !== id);
+        try { localStorage.setItem('xyg-feedback', JSON.stringify(feedbacks)); } catch (e) {}
+        renderAdmin();
+      }
+    }
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service Worker failed:', err));
+    }
+  </script>
+</body>
+</html>

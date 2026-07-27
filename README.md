@@ -16,6 +16,21 @@
 | manifest.json / sw.js | PWA（可安裝、可離線） |
 | icon-192.svg / icon-512.svg | App 圖示 |
 
+## 測試層 `test/`（改版先在這裡驗證，不影響營業）
+
+`test/` 是整個站台的複本，網址 https://charliersa.github.io/Dried-Fish-Brunch/test/ 。
+只要路徑含 `/test/`，`shared.js` 會自動切成測試模式，**資料與正式站完全分開**：
+
+- Firestore 集合全部加 `test_` 前綴（`test_orders`／`test_config`／`test_feedback`）→ 測試訂單不會出現在廚房、收銀、叫號螢幕
+- localStorage 的 key 也加前綴 → 不會蓋掉正式站的進行中訂單、後台登入狀態
+- 推播端點清空 → 測試單不會震到店裡與顧客的手機
+- 畫面最上方顯示橘色「🧪 測試站」橫幅
+
+**改版流程**：改動先進 `test/` → 在測試站確認 → **打烊後**再把 `test/` 的檔案覆蓋到根目錄（正式站）。
+營業時間（6:00–12:00）不要動根目錄的檔案。
+
+> Firestore 安全規則要允許 `test_` 開頭的集合讀寫，測試站才連得上。
+
 ## 本機測試
 在這個資料夾打開終端機，執行其中一個：
 ```powershell

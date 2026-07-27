@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#1c5e7a" />
+  <link rel="manifest" href="manifest.json" />
+  <title>廚房後台 - 小魚乾線上點餐系統</title>
+  <style>
+    /* 共用樣式由 shared.js 於頁尾注入 */
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="top-row">
+        <div class="brand">
+          <div class="brand-logo">🐟</div>
+          <div class="brand-text">
+            <h1>小魚乾早午餐</h1>
+            <p>DRIED FISH BRUNCH</p>
+          </div>
+        </div>
+        <div class="info-chip">⏰ 6:00–12:00</div>
+      </div>
+      <div class="address">📍 台南市東區長東街 106 號 · 現點現做，請耐心等候</div>
+      <div class="nav-pills">
+        <a href="customer.html">🍽️ 顧客點餐</a>
+        <a href="kitchen.html" style="background:#fff;color:var(--ink);">👨‍🍳 廚房後台</a>
+        <a href="cashier.html">💰 外場收銀</a>
+        <a href="display.html">📺 叫號螢幕</a>
+        <a href="admin.html">🔒 管理後台</a>
+      </div>
+    </header>
+    <main id="app"></main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="neworder-sound.js"></script>
+  <script src="shared.js"></script>
+  <script>document.head.insertAdjacentHTML('beforeend', '<style>' + getSharedStyles() + '</style>');</script>
+  <script>
+    applyDeviceCodeFromUrl();
+    const app = document.getElementById('app');
+    let orders = loadOrders();
+
+    function renderKitchen() {
+      const todayOrders = orders.filter(order => isToday(order.createdAt) && !order.rejected);
+      const active = todayOrders.filter(order => order.status !== 'done');
+      const doneOrders = todayOrders.filter(order => order.status === 'done');
+      const stats = {
+        total: todayOrders.length,
+        new: active.filter(order => order.status === 'new').length,
+        cook: active.filter(order => order.status === 'cook').length,
+        done: doneOrders.length,
+      };
+
+      // 已完成、但「結帳 + 取餐」尚未都完成 → 留在結單區；兩者都完成才消失
+      const ready = doneOrders.filter(o => !((o.pay && o.pay.paid) && o.picked));
+      const readyHtml = ready.length ? `
+        <div style="background:#fff;border-radius:18px;padding:14px 16px;margin-bottom:14px;box-shadow:0 2px 6px rgba(28,94,122,.07);border-left:6px solid #e5534b;">
+          <div style="font-weight:900;margin-bottom:10px;">🔴 待結單（${ready.length}） <span style="font-size:12px;color:var(--ink-soft);font-weight:400;">— 結帳＋取餐都完成後自動消失</span></div>
+          <div style="display:grid;gap:10px;">
+            ${ready.map(o => {
+              const paid = !!(o.pay && o.pay.paid);
+              const payBadge = paid
+                ? `<span style="font-weight:800;color:var(--green);font-size:13px;">${o.pay.method === 'cash' ? '💵 已結帳(現金)' : o.pay.method === 'mobile' ? '📱 已結帳(行動)' : '✅ 已結帳'}</span>`
+                : `<button class="pill-button" style="border-color:var(--green);color:var(--green);" data-action="pay-cash" data-id="${o.id}">💵 現金</button>
+                   <button class="pill-button" style="border-color:var(--blue);color:var(--blue);" data-action="pay-mobile" data-id="${o.id}">📱 行動</button>`;
+              const pickBadge = o.picked
+                ? `<span style="font-weight:800;color:var(--green);font-size:13px;">✅ 已取餐</span>`
+                : `<button class="pill-button" style="border-color:#e5534b;color:#e5534b;" data-action="pickup" data-id="${o.id}">✔️ 取餐</button>`;
+              const notifyBtn = `<button class="pill-button" style="border-color:#d84b84;color:#d84b84;font-weight:800;" data-action="notify-pickup" data-id="${o.id}">📣 ${o.notified ? '再通知取餐' : '通知取餐'}</button>${o.notified ? '<span style="font-size:12px;color:var(--green);font-weight:700;margin-left:4px;">✅ 已通知顧客</span>' : ''}`;
+              return `
+                <div style="border:2px solid #e5534b;border-radius:14px;padding:10px 12px;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                    <span style="font-size:22px;font-weight:900;color:#e5534b;">${escapeHtml(o.no)}</span>
+                    <span style="font-size:12px;color:var(--ink-soft);">${o.type} · ${escapeHtml(o.table || '')}${o.phone ? ' · 📞' + escapeHtml(o.phone) : ''} · $${o.total}</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <span style="font-size:13px;color:var(--ink-soft);">結帳：</span>${payBadge}
+                    <span style="font-size:13px;color:var(--ink-soft);margin-left:6px;">取餐：</span>${pickBadge}
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                    ${notifyBtn}
+                    <button class="pill-button" style="border-color:#9db4bf;color:#9db4bf;margin-left:auto;" data-action="cancel-order" data-id="${o.id}">✖ 取消</button>
+                  </div>
+                </div>`;
+            }).join('')}
+          </div>
+        </div>` : '';
+
+      const cardsHtml = active.length === 0 ?
+        '<div class="stat-card" style="grid-column:1/-1;">目前沒有待處理的訂單。已完成的訂單已移至管理後台「歷史訂單」。</div>' :
+        `<div class="order-grid">${active.map(order => renderKitchenCard(order)).join('')}</div>`;
+
+      app.innerHTML = `
+        <div class="stats-grid">
+          ${renderStat('今日訂單', stats.total)}
+          ${renderStat('待製作', stats.new, 'var(--amber)')}
+          ${renderStat('製作中', stats.cook, 'var(--blue)')}
+          ${renderStat('今日完成', stats.done, 'var(--green)')}
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+          <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);">${syncModeLabel()} · 自動更新</div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <button class="pill-button" data-action="set-device" style="cursor:pointer;">📟 本機代碼：${getDeviceCode()}</button>
+            <button class="pill-button" data-action="toggle-sound" style="cursor:pointer;">${soundEnabled ? '🔔 提示音：開' : '🔕 提示音：關'}</button>
+            ${(soundEnabled && !_audioReady) ? `<button class="pill-button" data-action="enable-sound" style="cursor:pointer;border-color:#e05252;color:#e05252;font-weight:900;">⚠️ 提示音未啟用 — 點我測試</button>` : ''}
+            <button class="pill-button" data-action="enable-push" style="cursor:pointer;${_pushState === 'granted' ? 'border-color:#3fa877;color:#3fa877;' : 'border-color:#e89a2b;color:#e89a2b;'}">${_pushState === 'granted' ? '✅ 關店通知：開' : '🔔 開啟關店通知'}</button>
+            <button class="pill-button" data-action="refresh" style="cursor:pointer;">重新整理</button>
+            <button class="pill-button" data-action="clear-orders" style="cursor:pointer;">清除今日</button>
+          </div>
+        </div>
+        ${readyHtml}
+        ${cardsHtml}
+      `;
+
+      attachEvents();
+    }
+
+    function renderStat(label, value, color) {
+      return `
+        <div class="stat-card">
+          <div style="font-size:24px;font-weight:900;color:${color || 'var(--ink)'};">${value}</div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">${label}</div>
+        </div>
+      `;
+    }
+
+    function renderKitchenCard(order) {
+      const statusMap = {
+        new: { label: '新訂單', color: 'var(--amber)', bg: 'var(--pink-bg)' },
+        cook: { label: '製作中', color: 'var(--blue)', bg: 'var(--blue-bg)' },
+        done: { label: '完成', color: 'var(--green)', bg: 'var(--green-bg)' },
+      };
+      const status = statusMap[order.status];
+      const actionButton = order.status === 'new'
+        ? `<button class="button-primary" style="background:var(--blue);" data-action="change-status" data-id="${order.id}" data-status="cook">👨‍🍳 開始製作</button>`
+        : order.status === 'cook'
+          ? `<button class="button-primary" style="background:var(--green);" data-action="change-status" data-id="${order.id}" data-status="done">✔️ 完成</button>`
+          : `<button class="button-primary" style="background:#9db4bf;">已完成</button>`;
+
+      return `
+        <div class="order-card" style="border-top-color:${status.color};">
+          <div class="order-head">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span style="font-size:22px;font-weight:900;color:var(--pink);">${order.no}</span>
+              <span style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;background:${status.bg};color:${status.color};">${status.label}</span>
+            </div>
+            <span style="font-size:12px;color:var(--ink-soft);">${new Date(order.createdAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+          </div>
+          <div class="order-meta">
+            <span>${order.type}</span>
+            <span>·</span>
+            <span>${escapeHtml(order.table)}</span>
+            ${order.phone ? `<span>·</span><span>📞 ${escapeHtml(order.phone)}</span>` : ''}
+          </div>
+          <div class="order-items">
+            ${order.items.map(item => { const mi = getItem(item.id); const nm = (mi && mi.name) || item.name || '未知品項'; return `
+              <div class="item-row"><span>${nm}${item.temp ? `（${item.temp}）` : ''}${item.note ? ` <span style="color:var(--amber);font-weight:700;">📝${escapeHtml(item.note)}</span>` : ''}</span><span>×${item.qty}</span></div>
+            `; }).join('')}
+            ${order.note ? `<div class="order-note">📝 ${escapeHtml(order.note)}</div>` : ''}
+          </div>
+          <div class="order-footer">
+            <span style="font-weight:800;color:var(--pink);">$${order.total}</span>
+            <div style="display:flex;align-items:center;gap:6px;">
+              ${order.status !== 'done' ? `<button class="pill-button" style="border-color:#e5534b;color:#e5534b;" data-action="reject" data-id="${order.id}">🚫 拒單</button>` : ''}
+              ${order.status !== 'done' ? `<button class="pill-button" style="border-color:#e5534b;color:#e5534b;padding:8px 12px;font-weight:800;" data-action="reject-quick" data-id="${order.id}" title="快速拒單（不問原因）">✕</button>` : ''}
+              ${actionButton}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function attachEvents() {
+      app.querySelectorAll('[data-action]').forEach(btn => btn.addEventListener('click', handleAction));
+    }
+
+    function handleAction(event) {
+      const btn = event.currentTarget;
+      const action = btn.dataset.action;
+      if (!action) return;
+
+      if (action === 'change-status') {
+        const id = btn.dataset.id;
+        const status = btn.dataset.status;
+        const order = orders.find(o => o.id === id);
+        if (order) {
+          order.status = status; // 樂觀更新
+          renderKitchen();
+          syncUpdateOrder(id, { status, updatedAt: Date.now() });
+        }
+      } else if (action === 'set-device') {
+        const c = prompt('設定本機代碼（會顯示在取餐號前，建議每台不同，例：A、B）', getDeviceCode());
+        if (c) { setDeviceCode(c); renderKitchen(); }
+      } else if (action === 'pickup') {
+        const id = btn.dataset.id;
+        const order = orders.find(o => o.id === id);
+        if (order) {
+          order.picked = true; // 樂觀更新：標記已取餐
+          renderKitchen();
+          syncUpdateOrder(id, { picked: true, updatedAt: Date.now() });
+        }
+      } else if (action === 'notify-pickup') {
+        const id = btn.dataset.id;
+        const order = orders.find(o => o.id === id);
+        if (order) {
+          order.notified = true; // 通知顧客可取餐（顧客手機顯示可取餐＋響＋推播）
+          renderKitchen();
+          syncUpdateOrder(id, { notified: true, updatedAt: Date.now() });
+          notifyOrderReady(order); // 關網頁也收得到的推播
+        }
+      } else if (action === 'cancel-order') {
+        const id = btn.dataset.id;
+        const order = orders.find(o => o.id === id);
+        if (order && confirm('確定要取消這張訂單嗎？\n取消後會從廚房、收銀、叫號畫面移除。')) {
+          order.rejected = true; order.rejectReason = '已取消';
+          renderKitchen();
+          syncUpdateOrder(id, { rejected: true, rejectReason: '已取消', updatedAt: Date.now() });
+        }
+      } else if (action === 'pay-cash' || action === 'pay-mobile') {
+        const id = btn.dataset.id;
+        const method = action === 'pay-cash' ? 'cash' : 'mobile';
+        const order = orders.find(o => o.id === id);
+        if (order && !(order.pay && order.pay.paid)) {
+          order.pay = { method, paid: true }; // 樂觀更新：標記已結帳（不動製作狀態）
+          renderKitchen();
+          syncUpdateOrder(id, { pay: { method, paid: true }, updatedAt: Date.now() });
+        }
+      } else if (action === 'reject') {
+        const id = btn.dataset.id;
+        const order = orders.find(o => o.id === id);
+        if (order && confirm('確定要拒絕這張訂單嗎？\n拒單後會從廚房、收銀、叫號螢幕移除，顧客畫面會顯示「訂單未被接受」。')) {
+          const reason = (prompt('拒單原因（顧客會看到，可留空）', '') || '').trim();
+          order.rejected = true; order.rejectReason = reason; // 樂觀更新
+          renderKitchen();
+          syncUpdateOrder(id, { rejected: true, rejectReason: reason, updatedAt: Date.now() });
+        }
+      } else if (action === 'reject-quick') {
+        const id = btn.dataset.id;
+        const order = orders.find(o => o.id === id);
+        if (order) {
+          order.rejected = true; order.rejectReason = ''; // 樂觀更新：快速拒單、不問原因、不跳確認框
+          renderKitchen();
+          syncUpdateOrder(id, { rejected: true, rejectReason: '', updatedAt: Date.now() });
+        }
+      } else if (action === 'enable-sound') {
+        _unlockAudio();
+        playNewOrderSound(); // 試響一聲，確認可以出聲
+      } else if (action === 'toggle-sound') {
+        toggleSound();
+      } else if (action === 'enable-push') {
+        registerBackendPush(true);
+      } else if (action === 'refresh') {
+        renderKitchen();
+      } else if (action === 'clear-orders') {
+        if (confirm('確定要清除「今日」的訂單嗎？（歷史訂單與報表不受影響）')) {
+          syncClearOrders({ todayOnly: true });
+        }
+      }
+    }
+
+    // ===== 新訂單提示音（Web Audio，免外部音檔）=====
+    let _audioCtx = null;
+    function _getAudioCtx() {
+      if (_audioCtx) return _audioCtx;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      _audioCtx = new AC();
+      return _audioCtx;
+    }
+    // 提示音音檔（HTMLAudio，相容性最高）；使用者互動一次即解鎖，之後可自動播放
+    const _alertAudio = new Audio(window.ALERT_SOUND_URI || '');
+    _alertAudio.preload = 'auto';
+    let _bpDone = false;
+    let _pushState = (typeof Notification !== 'undefined') ? Notification.permission : 'unsupported'; // granted/denied/default/unsupported
+    // 音訊是否真的已解鎖（瀏覽器自動播放封鎖）；沒解鎖的話新訂單不會有聲音
+    let _audioReady = false;
+    function _markAudioReady(v) {
+      if (_audioReady === v) return;
+      _audioReady = v;
+      try { renderKitchen(); } catch (e) {}
+    }
+    function _unlockAudio() {
+      const ctx = _getAudioCtx();
+      if (ctx && ctx.state === 'suspended') {
+        const r = ctx.resume();
+        if (r && r.then) r.then(() => { if (ctx.state === 'running') _markAudioReady(true); }).catch(() => {});
+      }
+      try {
+        _alertAudio.volume = 0;
+        const p = _alertAudio.play();
+        if (p && p.then) p.then(() => {
+          _alertAudio.pause(); _alertAudio.currentTime = 0; _alertAudio.volume = 1;
+          _markAudioReady(true); // 真的播得出來才算解鎖
+        }).catch(() => { _alertAudio.volume = 1; });
+      } catch (e) { _alertAudio.volume = 1; }
+      if (!_bpDone) { _bpDone = true; registerBackendPush(); } // 首次互動時註冊後端推播（關網頁也收得到新單）
+    }
+    document.addEventListener('touchend', _unlockAudio, { passive: true });
+    document.addEventListener('click', _unlockAudio, { passive: true });
+    // 註冊本裝置為「後端推播接收者」：授權通知→取得 token→存進 backendTokens
+    // interactive=true（手動點按鈕）或首次授權成功時，會跳確認視窗
+    async function registerBackendPush(interactive) {
+      try {
+        if (!('Notification' in window) || !('serviceWorker' in navigator)) { if (interactive) alert('此裝置或瀏覽器不支援通知'); return; }
+        if (typeof firebase === 'undefined' || typeof firebase.messaging !== 'function') return;
+        if (typeof PUSH_CONFIG === 'undefined' || !PUSH_CONFIG.vapidKey || PUSH_CONFIG.vapidKey.indexOf('PASTE') !== -1) return;
+        const before = Notification.permission;
+        let perm = before;
+        if (perm === 'default') perm = await Notification.requestPermission();
+        _pushState = perm; renderKitchen();
+        if (perm !== 'granted') { if (interactive) alert('⚠️ 尚未允許通知，關店時不會收到推播。\n可到 iPad「設定 → 通知」開啟本 App 的通知。'); return; }
+        const reg = await navigator.serviceWorker.register('firebase-messaging-sw.js', { scope: './fcm-scope/' });
+        const token = await firebase.messaging().getToken({ vapidKey: PUSH_CONFIG.vapidKey, serviceWorkerRegistration: reg });
+        if (!token) { if (interactive) alert('取得推播失敗，請重試'); return; }
+        let bid;
+        try { bid = localStorage.getItem('xyg-backend-id'); if (!bid) { bid = 'bk' + Date.now() + Math.floor(Math.random() * 1000); localStorage.setItem('xyg-backend-id', bid); } } catch (e) { bid = token.slice(-24); }
+        await firebase.firestore().collection('backendTokens').doc(bid).set({ token, updatedAt: Date.now() });
+        _pushState = 'granted'; renderKitchen();
+        if (before !== 'granted' || interactive) alert('✅ 關店通知已開啟！\n顧客下單時，即使這台網頁關著也會跳通知＋響。');
+      } catch (e) { if (interactive) alert('設定失敗：' + ((e && e.message) || e)); console.warn('後端推播註冊略過', e); }
+    }
+    // 提示音開關（預設開，記在 localStorage）
+    let soundEnabled = true;
+    try { soundEnabled = localStorage.getItem('xyg-kitchen-sound') !== 'off'; } catch (e) {}
+    function toggleSound() {
+      soundEnabled = !soundEnabled;
+      try { localStorage.setItem('xyg-kitchen-sound', soundEnabled ? 'on' : 'off'); } catch (e) {}
+      if (soundEnabled) { _unlockAudio(); playNewOrderSound(); } // 開啟時試響一聲並解鎖音訊
+      renderKitchen();
+    }
+    // 主要用音檔播放（相容性最高，平板也能響）；失敗才退回 Web Audio 合成
+    function playNewOrderSound() {
+      let ok = false;
+      try {
+        if (window.ALERT_SOUND_URI) {
+          _alertAudio.currentTime = 0;
+          _alertAudio.volume = 1;
+          const p = _alertAudio.play();
+          if (p) {
+            if (p.then) p.then(() => _markAudioReady(true));
+            // 播不出來 → 標記未解鎖（畫面會跳出警告）並試合成音
+            if (p.catch) p.catch(() => { _markAudioReady(false); });
+          }
+          ok = true;
+        }
+      } catch (e) {}
+      if (navigator.vibrate) navigator.vibrate([120, 60, 120, 60, 200]);
+    }
+    // 偵測是否有新的「新訂單」進來（首次同步不響，避免載入時把既有訂單全部當成新單）
+    let _knownIds = null;
+    function checkNewOrders(list) {
+      const ids = new Set(list.map(o => o.id));
+      if (_knownIds === null) { _knownIds = ids; return; } // 第一次載入：只記錄不響
+      const hasNew = list.some(o => !_knownIds.has(o.id) && o.status === 'new' && !o.rejected);
+      _knownIds = ids;
+      if (hasNew && soundEnabled) playNewOrderSound();
+    }
+    // 餐點完成 → 呼叫 push-server 推播到顧客手機（顧客有授權通知才會有 fcmToken）
+    function notifyOrderReady(order) {
+      try {
+        if (!order || !order.fcmToken) return;
+        if (typeof PUSH_CONFIG === 'undefined' || !PUSH_CONFIG.notifyEndpoint || PUSH_CONFIG.notifyEndpoint.indexOf('PASTE') !== -1) return;
+        fetch(PUSH_CONFIG.notifyEndpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: order.fcmToken, no: order.no }) }).catch(() => {});
+      } catch (e) {}
+    }
+
+    renderKitchen();
+    initSync(list => {
+      orders = list;
+      checkNewOrders(list); // 有新訂單就響鈴提醒
+      renderKitchen();
+    }, { today: true });
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service Worker failed:', err));
+    }
+  </script>
+</body>
+</html>
