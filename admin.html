@@ -409,6 +409,18 @@
     let addonLoaded = false;   // 雲端附加商品是否載入完成（沒載完不寫入，避免蓋掉既有資料）
     let addonSeeded = false;   // 目前畫面上的是「程式預設種子」而非雲端資料
     let addonEdit = null;      // 正在編輯的附加商品 { idx, id, name, img, active, options:[{id,label,price,orig}], isNew }
+    let addonUploading = false; // 圖片正在上傳到 Cloudinary
+
+    // ===== 圖片上傳（Cloudinary unsigned upload）=====
+    // 瀏覽器不能放 API Secret，所以要用 Cloudinary 後台建立的「unsigned upload preset」。
+    // 雲端名稱與 preset 存在 config/admin，店家可在「附加商品」分頁自行修改。
+    const CLOUDINARY_DEFAULT_CLOUD = 'dbiirpmpy'; // 目前圖片所在的 Cloudinary 帳號
+    const CLOUDINARY_FOLDER = 'fish-brunch';      // 上傳後放這個資料夾
+    const CLOUDINARY_MAX_PX = 900;                // 上傳前先縮到最長邊 900px（省流量、顧客載得快）
+    function cloudConf() {
+      const c = cfg.cloudinary || {};
+      return { cloud: (c.cloud || CLOUDINARY_DEFAULT_CLOUD).trim(), preset: (c.preset || '').trim() };
+    }
 
     const ADMIN_TABS = [
       { k: 'revenue', label: '營收管理' }, { k: 'ops', label: '營運管理' }, { k: 'cost', label: '成本管理' },
@@ -916,6 +928,33 @@
       ? `<img src="${escapeHtml(img)}" alt="" loading="lazy" style="width:${size}px;height:${size}px;border-radius:12px;object-fit:cover;background:var(--pink-bg);flex:none;">`
       : `<div style="width:${size}px;height:${size}px;border-radius:12px;background:var(--pink-bg);display:flex;align-items:center;justify-content:center;font-size:${Math.round(size / 2)}px;flex:none;">🍽️</div>`;
 
+    // 圖片上傳設定：沒設定 upload preset 就傳不了圖，直接把設定方式寫在畫面上
+    function cloudSettingsCard() {
+      const c = cloudConf();
+      const inputStyle = 'border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;font:inherit;color:var(--ink);outline:none;box-sizing:border-box;';
+      return `
+        <div class="admin-card" style="margin-bottom:14px;border:${c.preset ? '1px solid var(--line)' : '1.5px solid #e89a2b'};">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+            <h3 style="margin:0;font-size:15px;">☁️ 圖片上傳設定（Cloudinary）${c.preset
+              ? '<span class="badge" style="background:#e4f4ec;color:#3fa877;">可以上傳</span>'
+              : '<span class="badge" style="background:#fcf1dc;color:#e89a2b;">尚未設定</span>'}</h3>
+            <button class="mini-btn" data-action="ao-cloud-save">儲存設定</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;">
+            <label style="font-size:12px;color:var(--ink-soft);white-space:nowrap;">雲端名稱 Cloud name</label>
+            <input id="cloud-name" value="${escapeHtml(c.cloud)}" style="${inputStyle}width:180px;">
+            <label style="font-size:12px;color:var(--ink-soft);white-space:nowrap;">上傳預設 Upload preset</label>
+            <input id="cloud-preset" placeholder="例：xyg_unsigned" value="${escapeHtml(c.preset)}" style="${inputStyle}width:200px;">
+          </div>
+          ${c.preset ? '' : `<div style="font-size:12px;color:var(--ink-soft);margin-top:10px;line-height:1.8;">
+            還沒設定「上傳預設」，所以現在只能貼圖片網址。設定一次就好：<br>
+            1️⃣ 登入 <b>cloudinary.com</b> → 右上齒輪 <b>Settings</b> → <b>Upload</b> → <b>Upload presets</b><br>
+            2️⃣ 按 <b>Add upload preset</b>，把 <b>Signing Mode</b> 選成 <b>Unsigned</b>，取個名字（例：<b>xyg_unsigned</b>）後儲存<br>
+            3️⃣ 把那個名字填到上面的「上傳預設」欄位，按「儲存設定」即可開始上傳
+          </div>`}
+        </div>`;
+    }
+
     function tabAddons() {
       const head = `
         <div class="admin-card" style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
@@ -927,11 +966,11 @@
               : '<span class="badge" style="background:#e3f1fb;color:#3e9bd1;">雲端載入中…</span>'}</h3>
             <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;line-height:1.6;">
               顯示在顧客手機點餐頁最上方的「🧋 附加商品」區，可跟餐點放同一張訂單送出。<br>
-              圖片請填圖片網址（例：Cloudinary 上傳後的連結），留空會顯示 🍽️ 圖示。${addonSeeded ? '<br><b style="color:#e89a2b;">目前顯示的是程式預設商品；只要新增或編輯任何一項存檔，之後就完全以這裡的設定為準。</b>' : ''}
+              圖片可直接從手機或電腦選檔上傳（會自動縮圖後傳到 Cloudinary），留空會顯示 🍽️ 圖示。${addonSeeded ? '<br><b style="color:#e89a2b;">目前顯示的是程式預設商品；只要新增或編輯任何一項存檔，之後就完全以這裡的設定為準。</b>' : ''}
             </div>
           </div>
           <button class="add-btn" data-action="ao-add" style="flex:none;">＋ 新增附加商品</button>
-        </div>`;
+        </div>` + cloudSettingsCard();
 
       if (!addonList.length) {
         return head + `<div class="admin-card" style="color:#9db4bf;padding:14px 0;">目前沒有附加商品，顧客點餐頁不會出現這一區。按右上「＋ 新增附加商品」建立第一項（例：鮮乳 · 900ml罐 $85）。</div>`;
@@ -1273,13 +1312,22 @@
         html += `
           <div class="pin-overlay"><div class="pin-box" style="max-width:380px;">
             <h3 style="font-size:17px;font-weight:900;margin:0 0 14px;">${addonEdit.isNew ? '新增附加商品' : '編輯附加商品'}</h3>
-            <input id="ao-name" placeholder="商品名稱（例：鮮乳）" value="${escapeHtml(addonEdit.name || '')}" style="${inputStyle}margin-bottom:8px;" />
-            <input id="ao-img" placeholder="圖片網址（https://…，可留空）" value="${escapeHtml(addonEdit.img || '')}" style="${inputStyle}" />
-            <div style="display:flex;align-items:center;gap:10px;margin-top:10px;text-align:left;">
-              ${addonThumb(addonEdit.img, 56)}
-              <div style="font-size:12px;color:var(--ink-soft);line-height:1.6;">左邊是顧客會看到的圖片。<br>改完網址按一次「更新預覽」。</div>
-              <button class="mini-btn" data-action="ao-preview" style="flex:none;">更新預覽</button>
+            <input id="ao-name" placeholder="商品名稱（例：鮮乳）" value="${escapeHtml(addonEdit.name || '')}" style="${inputStyle}margin-bottom:10px;" />
+            <div style="display:flex;align-items:center;gap:10px;text-align:left;">
+              ${addonThumb(addonEdit.img, 64)}
+              <div style="min-width:0;flex:1;">
+                <input id="ao-file" type="file" accept="image/*" style="display:none;">
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                  <button class="mini-btn" data-action="ao-pick"${addonUploading ? ' disabled style="opacity:.5;"' : ''}>${addonUploading ? '⏳ 上傳中…' : (addonEdit.img ? '🔄 換一張圖片' : '📷 選擇圖片上傳')}</button>
+                  ${addonEdit.img && !addonUploading ? '<button class="mini-btn" data-action="ao-img-clear">移除圖片</button>' : ''}
+                </div>
+                <div style="font-size:11px;color:var(--ink-soft);margin-top:6px;line-height:1.6;">
+                  ${addonUploading ? '正在傳到 Cloudinary，請稍候…' : '選手機相簿或電腦裡的圖片即可，會自動縮圖後上傳。'}
+                </div>
+              </div>
             </div>
+            <input id="ao-img" placeholder="或直接貼圖片網址（https://…）" value="${escapeHtml(addonEdit.img || '')}" style="${inputStyle}margin-top:10px;font-size:12px;" />
+            <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;text-align:left;">貼網址的話，按一下<button class="mini-btn" data-action="ao-preview" style="padding:2px 8px;font-size:11px;margin:0 2px;">更新預覽</button>可先看效果。</div>
             <div style="margin-top:14px;text-align:left;">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
                 <div style="font-size:12px;color:var(--ink-soft);font-weight:700;">📦 規格與售價（至少一組；兩組以上顧客可切換）</div>
@@ -1382,6 +1430,13 @@
       if (_annT) _annT.addEventListener('input', () => { annDraft.text = _annT.value; });
       const _annE = document.getElementById('ann-edit-text');
       if (_annE) _annE.addEventListener('input', () => { if (annEdit) annEdit.text = _annE.value; });
+      // 附加商品彈窗：選好圖片就直接上傳到 Cloudinary
+      const _aoFile = document.getElementById('ao-file');
+      if (_aoFile) _aoFile.addEventListener('change', () => {
+        const f = _aoFile.files && _aoFile.files[0];
+        _aoFile.value = ''; // 清掉才能連續選同一張重傳
+        if (f) uploadAddonImage(f);
+      });
       // 品項彈窗：任何欄位變動都排程一次自動儲存
       if (editItem) {
         const ids = ['item-name', 'item-price', 'item-opts'];
@@ -1397,7 +1452,7 @@
       // → saveEnt
       'ent-save', 'ent-del', 'ing-plus', 'ing-minus', 'eq-cycle',
       // → saveConfig
-      'save-close-time', 'hist-save-sheet',
+      'save-close-time', 'hist-save-sheet', 'ao-cloud-save',
       // → 公告（也是寫進 config）
       'ann-add', 'ann-del', 'ann-toggle', 'ann-up', 'ann-down', 'ann-save',
     ];
@@ -1470,6 +1525,9 @@
       else if (a === 'ao-add') { addonEdit = { isNew: true, name: '', img: '', active: true, options: [{ label: '', price: '', orig: '' }] }; renderAdmin(); }
       else if (a === 'ao-edit') { openAddonEdit(parseInt(b.dataset.idx, 10)); }
       else if (a === 'ao-preview') { renderAdmin(); }
+      else if (a === 'ao-pick') { const f = document.getElementById('ao-file'); if (f) f.click(); }
+      else if (a === 'ao-img-clear') { addonEdit.img = ''; renderAdmin(); }
+      else if (a === 'ao-cloud-save') { saveCloudSettings(); }
       else if (a === 'ao-opt-add') { addonEdit.options = [...(addonEdit.options || []), { label: '', price: '', orig: '' }]; renderAdmin(); }
       else if (a === 'ao-opt-del') { const ix = parseInt(b.dataset.idx, 10); addonEdit.options = (addonEdit.options || []).filter((_, i) => i !== ix); renderAdmin(); }
       else if (a === 'ao-cancel') { addonEdit = null; renderAdmin(); }
@@ -1552,6 +1610,70 @@
       if (idx < 0 || j < 0 || j >= list.length) return;
       const tmp = list[idx]; list[idx] = list[j]; list[j] = tmp;
       commitAddons(list, '');
+    }
+
+    // ---------- 圖片上傳 ----------
+    function saveCloudSettings() {
+      const n = document.getElementById('cloud-name');
+      const p = document.getElementById('cloud-preset');
+      cfg = Object.assign({}, cfg, {
+        cloudinary: { cloud: (n ? n.value : '').trim() || CLOUDINARY_DEFAULT_CLOUD, preset: (p ? p.value : '').trim() },
+      });
+      saveConfig(cfg);
+      renderAdmin();
+      showMessage(cloudConf().preset ? '✅ 已儲存，現在可以直接上傳圖片了' : '已儲存（尚未填上傳預設，仍只能貼網址）');
+    }
+
+    // 上傳前先縮圖：手機照片動輒 3～5MB，縮到最長邊 900px 顧客端載得快、也省 Cloudinary 空間
+    function shrinkImage(file) {
+      return new Promise(resolve => {
+        if (!file.type || file.type.indexOf('image/') !== 0 || typeof createImageBitmap !== 'function') { resolve(file); return; }
+        createImageBitmap(file).then(bmp => {
+          const long = Math.max(bmp.width, bmp.height);
+          const scale = Math.min(1, CLOUDINARY_MAX_PX / long);
+          if (scale === 1 && file.size < 800 * 1024) { if (bmp.close) bmp.close(); resolve(file); return; }
+          const w = Math.max(1, Math.round(bmp.width * scale));
+          const h = Math.max(1, Math.round(bmp.height * scale));
+          const cv = document.createElement('canvas');
+          cv.width = w; cv.height = h;
+          const ctx = cv.getContext('2d');
+          ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); // 透明底轉 JPEG 會變黑，先鋪白底
+          ctx.drawImage(bmp, 0, 0, w, h);
+          if (bmp.close) bmp.close();
+          cv.toBlob(blob => resolve(blob || file), 'image/jpeg', 0.85);
+        }).catch(() => resolve(file)); // HEIC 之類瀏覽器解不開的，直接原檔上傳讓 Cloudinary 轉
+      });
+    }
+
+    function uploadAddonImage(file) {
+      if (!file || !addonEdit) return;
+      const conf = cloudConf();
+      if (!conf.preset) { showMessage('⚠️ 請先在上方「圖片上傳設定」填入 Cloudinary 的上傳預設（upload preset）'); return; }
+      if (file.size > 20 * 1024 * 1024) { showMessage('⚠️ 圖片太大（超過 20MB），請先壓縮或改選別張'); return; }
+      captureAddonModal(); // 先把打到一半的名稱／價格收起來，重繪才不會不見
+      addonUploading = true;
+      renderAdmin();
+      shrinkImage(file).then(blob => {
+        const fd = new FormData();
+        fd.append('file', blob);
+        fd.append('upload_preset', conf.preset);
+        fd.append('folder', CLOUDINARY_FOLDER);
+        return fetch('https://api.cloudinary.com/v1_1/' + encodeURIComponent(conf.cloud) + '/image/upload', { method: 'POST', body: fd })
+          .then(res => res.json().catch(() => ({})).then(json => ({ ok: res.ok, json })));
+      }).then(r => {
+        if (!r.ok || !r.json || !r.json.secure_url) {
+          throw new Error((r.json && r.json.error && r.json.error.message) || '上傳失敗');
+        }
+        addonUploading = false;
+        if (addonEdit) addonEdit.img = r.json.secure_url;
+        renderAdmin();
+        showMessage('✅ 圖片已上傳');
+      }).catch(e => {
+        console.warn('圖片上傳失敗', e);
+        addonUploading = false;
+        renderAdmin();
+        showMessage('⚠️ 圖片上傳失敗：' + (e && e.message ? e.message : '請檢查網路與上傳預設設定'));
+      });
     }
 
     // 整份寫回雲端 config/addons（跟菜單一樣先更新本機鏡像，快照回來會再校正一次）
