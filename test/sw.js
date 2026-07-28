@@ -8,7 +8,7 @@ const ASSETS = [
   './cashier.html',
   './display.html',
   './admin.html',
-  './shared.js',
+  './core/shared.js',
   './firebase-config.js',
   './manifest.json',
   './sw.js',
