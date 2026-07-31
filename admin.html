@@ -192,8 +192,10 @@
       background: rgba(20, 50, 65, .5);
       z-index: 60;
       display: flex;
-      align-items: center;
+      /* 內容比畫面高時（例如加價選項很多）要能捲動，不然按不到「儲存」 */
+      align-items: flex-start;
       justify-content: center;
+      overflow-y: auto;
       padding: 20px;
     }
 
@@ -203,6 +205,7 @@
       padding: 24px;
       width: 100%;
       max-width: 340px;
+      margin: auto; /* 放得下時垂直置中，放不下時從最上面開始，才不會被切掉 */
       box-shadow: 0 12px 34px rgba(0, 0, 0, .22);
       text-align: center;
     }
@@ -893,7 +896,7 @@
           const off = it.active === false, so = !!it.soldOut;
           return `
           <div class="ent-row" style="opacity:${off ? .5 : 1};">
-            <div style="font-weight:700;">${escapeHtml(it.name)} <span style="color:var(--ink-soft);font-weight:400;">$${it.price}</span>${so ? ' <span class="badge" style="background:#fcf1dc;color:#e89a2b;">售完</span>' : ''}${(it.opts && it.opts.length) ? `<div style="font-size:11px;color:var(--ink-soft);font-weight:400;margin-top:2px;">📝 ${it.opts.map(escapeHtml).join('、')}</div>` : ''}${(it.addons && it.addons.length) ? `<div style="font-size:11px;color:var(--pink);font-weight:400;margin-top:2px;">💰 ${it.addons.map(a => '+$' + a.price + ' ' + escapeHtml(a.name)).join('、')}</div>` : ''}</div>
+            <div style="font-weight:700;">${escapeHtml(it.name)} <span style="color:var(--ink-soft);font-weight:400;">$${it.price}</span>${so ? ' <span class="badge" style="background:#fcf1dc;color:#e89a2b;">售完</span>' : ''}${(it.opts && it.opts.length) ? `<div style="font-size:11px;color:var(--ink-soft);font-weight:400;margin-top:2px;">📝 ${it.opts.map(escapeHtml).join('、')}</div>` : ''}${it.baseDrink ? `<div style="font-size:11px;color:var(--blue);font-weight:400;margin-top:2px;">🥤 套餐附 ${escapeHtml(it.baseDrink)}</div>` : ''}${(it.addons && it.addons.length) ? `<div style="font-size:11px;color:var(--pink);font-weight:400;margin-top:2px;">💰 ${it.addons.map(a => (a.drink ? '🥤換' : '➕') + escapeHtml(a.name) + ' +$' + a.price).join('、')}</div>` : ''}</div>
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
               <button class="mini-btn" data-action="item-active" data-cat="${cat.id}" data-id="${it.id}">${off ? '上架' : '下架'}</button>
               <button class="mini-btn" data-action="item-sold" data-cat="${cat.id}" data-id="${it.id}" style="background:${so ? '#e1f4ea' : '#fcf1dc'};color:${so ? '#3fa877' : '#e89a2b'};border:none;">${so ? '補貨' : '售完'}</button>
@@ -1273,18 +1276,30 @@
             <textarea id="item-opts" placeholder="備註選項（一行一個，例：&#10;不要沙拉&#10;不要蕃茄醬）" style="width:100%;min-height:96px;margin-top:8px;border:1.5px solid var(--line);border-radius:12px;padding:11px 14px;font:inherit;color:var(--ink);outline:none;box-sizing:border-box;resize:vertical;text-align:left;letter-spacing:normal;">${escapeHtml(editItem.opts || '')}</textarea>
             <div style="font-size:12px;color:var(--ink-soft);margin-top:4px;text-align:left;">顧客點此品項時可一鍵勾選；留空則用該分類預設選項。</div>
             <div style="margin-top:12px;text-align:left;">
-              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
-                <div style="font-size:12px;color:var(--ink-soft);font-weight:700;">💰 加價選項（後台記錄用，不影響顧客點餐與總價）</div>
+              <input id="item-basedrink" placeholder="套餐內含飲料（例：紅茶；非套餐請留空）" value="${escapeHtml(editItem.baseDrink || '')}" list="admin-drink-list" style="text-align:left;letter-spacing:normal;margin:0 0 4px;" />
+              <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px;">有填的話，顧客點餐頁會顯示「套餐附 紅茶」，並可用下面的🥤選項加價更換。</div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
+                <div style="font-size:12px;color:var(--ink-soft);font-weight:700;">💰 加價選項（顧客點餐時可加選，會計入總價）</div>
                 <button class="mini-btn" data-action="addon-add" style="flex:none;">＋ 新增</button>
               </div>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+                <span style="font-size:12px;color:var(--ink-soft);">一鍵加入換飲料：</span>
+                ${DRINK_PRESETS.map(p => `<button class="mini-btn" data-action="addon-preset" data-name="${escapeHtml(p.name)}" data-price="${p.price}" style="flex:none;border-color:var(--blue);color:var(--blue);">🥤 +${p.price} ${escapeHtml(p.name)}</button>`).join('')}
+              </div>
               ${(editItem.addons || []).length ? (editItem.addons || []).map((ad, i) => `
-              <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
-                <span style="color:var(--pink);font-weight:900;">+$</span>
-                <input id="item-addon-price-${i}" type="number" placeholder="金額" value="${ad.price != null ? escapeHtml(String(ad.price)) : ''}" style="width:74px;flex:none;box-sizing:border-box;text-align:left;letter-spacing:normal;margin:0;" />
-                <input id="item-addon-name-${i}" placeholder="加價項目名稱（例：加蛋）" value="${escapeHtml(ad.name || '')}" style="flex:1;width:auto;box-sizing:border-box;text-align:left;letter-spacing:normal;margin:0;" />
-                <button class="mini-btn" data-action="addon-del" data-idx="${i}" style="flex:none;">🗑</button>
-              </div>`).join('') : '<div style="font-size:12px;color:#9db4bf;padding:2px 0 4px;">尚無加價選項，按右上「＋ 新增」加入。</div>'}
+              <div style="border:1.5px solid var(--line);border-radius:12px;padding:8px;margin-bottom:8px;">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                  <button class="mini-btn" data-action="addon-drink" data-idx="${i}" title="切換「換飲料／加購」" style="flex:none;white-space:nowrap;${ad.drink ? 'border-color:var(--blue);color:var(--blue);' : ''}">${ad.drink ? '🥤 換飲料' : '➕ 加購'}</button>
+                  <span style="color:var(--pink);font-weight:900;">+$</span>
+                  <input id="item-addon-price-${i}" type="number" placeholder="金額" value="${ad.price != null ? escapeHtml(String(ad.price)) : ''}" style="width:80px;flex:none;box-sizing:border-box;text-align:left;letter-spacing:normal;margin:0;" />
+                  <div style="flex:1;"></div>
+                  <button class="mini-btn" data-action="addon-del" data-idx="${i}" style="flex:none;">🗑</button>
+                </div>
+                <input id="item-addon-name-${i}" placeholder="${ad.drink ? '飲料名稱（例：奶茶）' : '加價項目名稱（例：加蛋）'}" value="${escapeHtml(ad.name || '')}"${ad.drink ? ' list="admin-drink-list"' : ''} style="width:100%;box-sizing:border-box;text-align:left;letter-spacing:normal;margin:0;" />
+              </div>`).join('') : '<div style="font-size:12px;color:#9db4bf;padding:2px 0 4px;">尚無加價選項，按右上「＋ 新增」或上面的一鍵按鈕加入。</div>'}
+              <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;">🥤 換飲料：顧客只能選一種（換掉套餐飲料）；➕ 加購：可以複選。</div>
             </div>
+            <datalist id="admin-drink-list">${drinkNames().map(n => `<option value="${escapeHtml(n)}"></option>`).join('')}</datalist>
             <div id="item-autosave" style="font-size:12px;color:var(--green);font-weight:700;text-align:right;min-height:16px;margin-top:6px;">${autoSaveStatus === 'saving' ? '儲存中…' : autoSaveStatus === 'saved' ? '✓ 已自動儲存' : ''}</div>
             <div class="pin-actions">
               <button class="pill-button" style="flex:1;" data-action="item-cancel">${editItem.autoSaved ? '關閉' : '取消'}</button>
@@ -1439,7 +1454,7 @@
       });
       // 品項彈窗：任何欄位變動都排程一次自動儲存
       if (editItem) {
-        const ids = ['item-name', 'item-price', 'item-opts'];
+        const ids = ['item-name', 'item-price', 'item-opts', 'item-basedrink'];
         (editItem.addons || []).forEach((_, i) => ids.push('item-addon-name-' + i, 'item-addon-price-' + i));
         ids.forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('input', scheduleAutoSave); });
       }
@@ -1498,9 +1513,18 @@
       else if (a === 'item-active') { toggleItem(cat, id, 'active'); }
       else if (a === 'item-sold') { toggleItem(cat, id, 'soldOut'); }
       else if (a === 'item-del') { if (confirm('確定刪除此品項？')) deleteItem(cat, id); }
-      else if (a === 'item-edit') { const it = findItem(cat, id); editItem = { catId: cat, id, name: it.name, price: it.price, opts: (it.opts || []).join('\n'), addons: loadAddons(it), isNew: false }; autoSaveStatus = ''; renderAdmin(); }
-      else if (a === 'item-add') { editItem = { catId: cat, name: '', price: '', opts: '', addons: [], isNew: true }; autoSaveStatus = ''; renderAdmin(); }
-      else if (a === 'addon-add') { captureItemModal(); editItem.addons = [...(editItem.addons || []), { name: '', price: '' }]; renderAdmin(); }
+      else if (a === 'item-edit') { const it = findItem(cat, id); editItem = { catId: cat, id, name: it.name, price: it.price, opts: (it.opts || []).join('\n'), addons: loadAddons(it), baseDrink: it.baseDrink || '', isNew: false }; autoSaveStatus = ''; renderAdmin(); }
+      else if (a === 'item-add') { editItem = { catId: cat, name: '', price: '', opts: '', addons: [], baseDrink: '', isNew: true }; autoSaveStatus = ''; renderAdmin(); }
+      else if (a === 'addon-add') { captureItemModal(); editItem.addons = [...(editItem.addons || []), { name: '', price: '', drink: false }]; renderAdmin(); }
+      else if (a === 'addon-preset') {
+        captureItemModal();
+        const nm = b.dataset.name, pr = parseInt(b.dataset.price, 10);
+        const list = (editItem.addons || []).filter(x => (x.name || '').trim() || x.price !== ''); // 順手清掉還沒填的空白列
+        if (list.some(x => (x.name || '').trim() === nm && x.drink)) { showMessage('已經有「' + nm + '」了'); return; }
+        editItem.addons = [...list, { name: nm, price: pr, drink: true }];
+        renderAdmin(); scheduleAutoSave();
+      }
+      else if (a === 'addon-drink') { captureItemModal(); const ix = parseInt(b.dataset.idx, 10); editItem.addons = (editItem.addons || []).map((x, i) => i !== ix ? x : Object.assign({}, x, { drink: !x.drink })); renderAdmin(); scheduleAutoSave(); }
       else if (a === 'addon-del') { captureItemModal(); const ix = parseInt(b.dataset.idx, 10); editItem.addons = (editItem.addons || []).filter((_, i) => i !== ix); renderAdmin(); scheduleAutoSave(); }
       else if (a === 'item-cancel') { if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null; } editItem = null; autoSaveStatus = ''; renderAdmin(); }
       else if (a === 'item-save') { saveItem(); }
@@ -1805,11 +1829,23 @@
       cfg.menu = cfg.menu.map(c => c.id !== catId ? c : Object.assign({}, c, { items: c.items.filter(i => i.id !== id) }));
       saveMenu(cfg.menu); renderAdmin();
     }
+    // 顧客端常用的換飲料加價（後台一鍵加入）
+    const DRINK_PRESETS = [{ name: '奶茶', price: 10 }, { name: '豆漿', price: 15 }, { name: '鮮奶茶', price: 35 }];
+    // 菜單裡的飲料品項（大類有 temp 或名稱含「飲料」），當作後台輸入飲料名稱的建議清單
+    function drinkNames() {
+      const list = [];
+      (cfg.menu || []).forEach(c => {
+        if (!(c.temp || (c.name || '').indexOf('飲料') !== -1)) return;
+        (c.items || []).forEach(it => { if (it.name && list.indexOf(it.name) === -1) list.push(it.name); });
+      });
+      DRINK_PRESETS.forEach(p => { if (list.indexOf(p.name) === -1) list.push(p.name); });
+      return list;
+    }
     // 讀取品項既有的加價選項；相容舊的 add5/add10/add15 欄位（自動轉成清單）
     function loadAddons(it) {
-      let list = Array.isArray(it.addons) ? it.addons.map(a => ({ name: a.name || '', price: a.price != null ? a.price : '' })) : [];
+      let list = Array.isArray(it.addons) ? it.addons.map(a => ({ name: a.name || '', price: a.price != null ? a.price : '', drink: !!a.drink })) : [];
       if (!list.length) {
-        [['5', it.add5], ['10', it.add10], ['15', it.add15]].forEach(([p, nm]) => { if (nm) list.push({ name: nm, price: parseInt(p, 10) }); });
+        [['5', it.add5], ['10', it.add10], ['15', it.add15]].forEach(([p, nm]) => { if (nm) list.push({ name: nm, price: parseInt(p, 10), drink: false }); });
       }
       return list;
     }
@@ -1819,6 +1855,7 @@
       const n = document.getElementById('item-name'); if (n) editItem.name = n.value;
       const p = document.getElementById('item-price'); if (p) editItem.price = p.value;
       const o = document.getElementById('item-opts'); if (o) editItem.opts = o.value;
+      const bd = document.getElementById('item-basedrink'); if (bd) editItem.baseDrink = bd.value;
       (editItem.addons || []).forEach((ad, i) => {
         const nm = document.getElementById('item-addon-name-' + i);
         const pr = document.getElementById('item-addon-price-' + i);
@@ -1834,14 +1871,15 @@
       if (!name || !(price >= 0)) return false;
       const opts = (editItem.opts || '').split('\n').map(s => s.trim()).filter(Boolean);
       // 只保留「有填名稱且金額為有效數字」的加價選項，空白列自動略過
-      const addons = (editItem.addons || []).map(a => ({ name: (a.name || '').trim(), price: parseInt(a.price, 10) })).filter(a => a.name && !isNaN(a.price) && a.price >= 0);
+      const addons = (editItem.addons || []).map(a => ({ name: (a.name || '').trim(), price: parseInt(a.price, 10), drink: !!a.drink })).filter(a => a.name && !isNaN(a.price) && a.price >= 0);
+      const baseDrink = (editItem.baseDrink || '').trim();
       if (editItem.isNew) {
         const nid = 'x' + Date.now();
         editItem.id = nid;
         editItem.isNew = false; // 已建立，之後改為「更新」，避免每次自動儲存都新增一筆
-        cfg.menu = cfg.menu.map(c => c.id !== editItem.catId ? c : Object.assign({}, c, { items: [...c.items, { id: nid, name, price, opts, addons, active: true, soldOut: false }] }));
+        cfg.menu = cfg.menu.map(c => c.id !== editItem.catId ? c : Object.assign({}, c, { items: [...c.items, { id: nid, name, price, opts, addons, baseDrink, active: true, soldOut: false }] }));
       } else {
-        cfg.menu = cfg.menu.map(c => c.id !== editItem.catId ? c : Object.assign({}, c, { items: c.items.map(i => i.id !== editItem.id ? i : Object.assign({}, i, { name, price, opts, addons })) }));
+        cfg.menu = cfg.menu.map(c => c.id !== editItem.catId ? c : Object.assign({}, c, { items: c.items.map(i => i.id !== editItem.id ? i : Object.assign({}, i, { name, price, opts, addons, baseDrink })) }));
       }
       return true;
     }
