@@ -315,7 +315,7 @@
     let orders = loadOrders();
 
     const state = {
-      cart: [],            // [{ lineId, id, temp, note, qty }]
+      cart: [],            // [{ lineId, id, temp, note, qty, extras }]
       diningType: '內用',
       tableInfo: '',
       phone: '',
@@ -327,6 +327,8 @@
       itemQty: 1,
       itemNote: '',
       itemOptions: [],
+      itemDrink: -1,       // 已選的換飲料選項（item.addons 的索引；-1 = 維持套餐原本飲料）
+      itemAdds: [],        // 已選的加購選項（item.addons 的索引，可複選）
       currentOrderId: null,
       submitting: false,
     };
@@ -335,10 +337,40 @@
       return state.cart.reduce((total, line) => total + line.qty, 0);
     }
 
+    // ===== 加價選項（後台菜單編輯設定）：🥤 換套餐飲料只能選一個，➕ 加購可複選 =====
+    function itemAddons(item) {
+      return (item && Array.isArray(item.addons) ? item.addons : [])
+        .map((a, i) => ({ i, name: (a.name || '').trim(), price: parseInt(a.price, 10) || 0, drink: !!a.drink }))
+        .filter(a => a.name);
+    }
+    // 依目前彈窗選擇取出加價項目（存進購物車一行的 extras）
+    function pickedExtras(item) {
+      const list = itemAddons(item);
+      const out = [];
+      const d = list.find(a => a.drink && a.i === state.itemDrink);
+      if (d) out.push(d);
+      list.forEach(a => { if (!a.drink && state.itemAdds.indexOf(a.i) !== -1) out.push(a); });
+      return out.map(a => ({ name: a.name, price: a.price, drink: a.drink }));
+    }
+    function extrasTotal(extras) {
+      return (extras || []).reduce((sum, e) => sum + (parseInt(e.price, 10) || 0), 0);
+    }
+    function extrasLabel(extras) {
+      return (extras || []).map(e => (e.drink ? '換' : '＋') + e.name).join('、');
+    }
+    function extrasKey(extras) {
+      return (extras || []).map(e => (e.drink ? 'D' : 'A') + e.name + ':' + e.price).join('|');
+    }
+    // 購物車一行的單價＝品項價格＋加價選項
+    function linePrice(line) {
+      const item = getItem(line.id);
+      return (item ? item.price : 0) + extrasTotal(line.extras);
+    }
+
     function cartTotal() {
       return state.cart.reduce((sum, line) => {
         const item = getItem(line.id);
-        return sum + (item ? item.price * line.qty : 0);
+        return sum + (item ? linePrice(line) * line.qty : 0);
       }, 0);
     }
 
@@ -354,12 +386,14 @@
       return CURRENT_MENU.filter(cat => !isHiddenForCustomer(cat) && cat.items.some(it => it.active !== false));
     }
 
-    function addToCart(id, temp, note, qty) {
-      const existing = state.cart.find(line => line.id === id && line.temp === (temp || '') && (line.note || '') === (note || ''));
+    function addToCart(id, temp, note, qty, extras) {
+      extras = extras || [];
+      const key = extrasKey(extras);
+      const existing = state.cart.find(line => line.id === id && line.temp === (temp || '') && (line.note || '') === (note || '') && extrasKey(line.extras) === key);
       if (existing) {
         existing.qty += qty;
       } else {
-        state.cart.push({ lineId: Date.now() + '_' + Math.floor(Math.random() * 1000), id, temp: temp || '', note: note || '', qty });
+        state.cart.push({ lineId: Date.now() + '_' + Math.floor(Math.random() * 1000), id, temp: temp || '', note: note || '', qty, extras });
       }
     }
 
@@ -458,7 +492,12 @@
       const hasTemp = !!(category && category.temp);
       const temp = hasTemp ? (state.itemTemp || '冷') : '';
       const qty = state.itemQty || 1;
-      const subtotal = item.price * qty;
+      const extras = pickedExtras(item);
+      const extraSum = extrasTotal(extras);
+      const subtotal = (item.price + extraSum) * qty;
+      const addons = itemAddons(item);
+      const drinkOpts = addons.filter(a => a.drink);
+      const addOpts = addons.filter(a => !a.drink);
 
       return `
         <div class="overlay" data-action="close-item">
@@ -467,12 +506,25 @@
               <h3>${item.name}</h3>
               <button data-action="close-item" style="border:none;background:none;cursor:pointer;color:var(--ink-soft);font-size:20px;">✕</button>
             </div>
-            <div style="color:var(--pink);font-weight:900;font-size:18px;margin-bottom:16px;">$${item.price}</div>
+            <div style="color:var(--pink);font-weight:900;font-size:18px;margin-bottom:16px;">$${item.price}${extraSum ? `<span style="font-size:14px;color:var(--ink-soft);"> ＋加價 $${extraSum}</span>` : ''}</div>
             ${hasTemp ? `
               <div style="font-weight:700;margin-bottom:6px;">溫度</div>
               <div class="toggle-row">
                 <button class="${temp === '冷' ? 'active' : ''}" data-action="item-temp" data-temp="冷">🧊 冷</button>
                 <button class="${temp === '熱' ? 'active' : ''}" data-action="item-temp" data-temp="熱">🔥 熱</button>
+              </div>
+            ` : ''}
+            ${drinkOpts.length ? `
+              <div style="font-weight:700;margin:6px 0;">🥤 更換飲料${item.baseDrink ? `<span style="font-weight:400;color:var(--ink-soft);font-size:12px;">（套餐原本附 ${escapeHtml(item.baseDrink)}）</span>` : ''}</div>
+              <div class="opt-grid">
+                ${item.baseDrink ? `<button class="opt-chip ${state.itemDrink < 0 ? 'active' : ''}" data-action="item-drink" data-idx="-1">${escapeHtml(item.baseDrink)}（不加價）</button>` : ''}
+                ${drinkOpts.map(a => `<button class="opt-chip ${state.itemDrink === a.i ? 'active' : ''}" data-action="item-drink" data-idx="${a.i}">${state.itemDrink === a.i ? '✓ ' : ''}${escapeHtml(a.name)} +$${a.price}</button>`).join('')}
+              </div>
+            ` : ''}
+            ${addOpts.length ? `
+              <div style="font-weight:700;margin:6px 0;">➕ 加購（可複選）</div>
+              <div class="opt-grid">
+                ${addOpts.map(a => `<button class="opt-chip ${state.itemAdds.indexOf(a.i) !== -1 ? 'active' : ''}" data-action="item-addon" data-idx="${a.i}">${state.itemAdds.indexOf(a.i) !== -1 ? '✓ ' : ''}${escapeHtml(a.name)} +$${a.price}</button>`).join('')}
               </div>
             ` : ''}
             <div style="font-weight:700;margin:6px 0;">餐點備註</div>
@@ -506,7 +558,7 @@
               <span style="font-weight:700">${item.name}</span>
               ${line.temp ? `<span style="margin-left:6px;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:${line.temp === '冷' ? 'var(--blue-bg)' : 'rgba(232,154,43,.15)'};color:${line.temp === '冷' ? 'var(--blue)' : 'var(--amber)'}">${line.temp}</span>` : ''}
               ${line.note ? `<div style="font-size:12px;color:var(--amber);margin-top:2px;">📝 ${escapeHtml(line.note)}</div>` : ''}
-              <div style="font-size:12px;color:var(--ink-soft);">$${item.price}</div>
+              <div style="font-size:12px;color:var(--ink-soft);">$${linePrice(line)}</div>
             </div>
             <div class="stepper">
               <button class="circle-button" data-action="dec-line" data-line="${line.lineId}">－</button>
@@ -684,7 +736,18 @@
         state.itemQty = 1;
         state.itemNote = '';
         state.itemOptions = [];
+        state.itemDrink = -1;
+        state.itemAdds = [];
         state.cartOpen = false;
+        renderCustomer();
+      } else if (action === 'item-drink') {
+        // 換飲料只能選一個；再按一次取消，回到套餐原本的飲料
+        const ix = parseInt(btn.dataset.idx, 10);
+        state.itemDrink = (state.itemDrink === ix || ix < 0) ? -1 : ix;
+        renderCustomer();
+      } else if (action === 'item-addon') {
+        const ix = parseInt(btn.dataset.idx, 10);
+        state.itemAdds = state.itemAdds.indexOf(ix) !== -1 ? state.itemAdds.filter(x => x !== ix) : state.itemAdds.concat([ix]);
         renderCustomer();
       } else if (action === 'item-opt') {
         const o = btn.dataset.opt;
@@ -707,11 +770,13 @@
         const item = getItem(state.activeItem);
         const noteEl = document.getElementById('item-note-input');
         const freeText = (noteEl ? noteEl.value : (state.itemNote || '')).trim();
-        const note = state.itemOptions.concat(freeText ? [freeText] : []).join('、');
+        const extras = pickedExtras(item);
+        // 加價選項寫進備註最前面，廚房／收銀／後台的每個畫面都看得到
+        const note = (extras.length ? [extrasLabel(extras)] : []).concat(state.itemOptions, freeText ? [freeText] : []).join('、');
         const qty = state.itemQty || 1;
         const temp = state.itemTemp || '';
-        addToCart(state.activeItem, temp, note, qty);
-        showMessage(`已加入購物車：${item ? item.name : ''}${temp ? '（' + temp + '）' : ''} ×${qty}`);
+        addToCart(state.activeItem, temp, note, qty, extras);
+        showMessage(`已加入購物車：${item ? item.name : ''}${temp ? '（' + temp + '）' : ''}${extras.length ? '（' + extrasLabel(extras) + '）' : ''} ×${qty}`);
         state.activeItem = null;
         renderCustomer();
       } else if (action === 'jump-cat') {
@@ -758,6 +823,8 @@
         state.cartOpen = false;
         state.activeItem = null;
         state.itemOptions = [];
+        state.itemDrink = -1;
+        state.itemAdds = [];
         state.submitting = false;
         renderCustomer();
       }
@@ -860,7 +927,7 @@
         note: state.note.trim(),
         items: state.cart.map(line => {
           const mi = getItem(line.id);
-          return { id: line.id, name: mi ? mi.name : '', price: mi ? mi.price : 0, temp: line.temp || '', note: line.note || '', qty: line.qty };
+          return { id: line.id, name: mi ? mi.name : '', price: linePrice(line), temp: line.temp || '', note: line.note || '', qty: line.qty, extras: line.extras || [] };
         }),
         total: cartTotal(),
         status: 'new',
