@@ -110,6 +110,24 @@
       `;
     }
 
+    // ===== 訂單品項的加價選項（顧客點餐時選的「🥤換飲料／➕加購」）=====
+    // 送單時也會寫進 note 開頭當備援；有結構化的 extras 就把它從備註拆出來單獨標示
+    function itemExtras(it) { return Array.isArray(it.extras) ? it.extras.filter(e => e && e.name) : []; }
+    function extrasLabel(ex) { return ex.map(e => (e.drink ? '換' : '＋') + e.name).join('、'); }
+    function itemPureNote(it) {
+      const ex = itemExtras(it), note = it.note || '';
+      if (!ex.length) return note;
+      const lab = extrasLabel(ex);
+      if (note === lab) return '';
+      return note.indexOf(lab + '、') === 0 ? note.slice(lab.length + 1) : note;
+    }
+    function extrasChips(it) {
+      return itemExtras(it).map(e => {
+        const isDrink = !!e.drink;
+        return `<span style="display:inline-block;font-size:12px;font-weight:800;padding:1px 8px;border-radius:999px;margin-left:4px;background:${isDrink ? 'var(--blue-bg)' : 'var(--pink-bg)'};color:${isDrink ? 'var(--blue)' : 'var(--pink-deep)'};">${isDrink ? '🥤 換 ' : '➕ '}${escapeHtml(e.name)}${e.price ? ' +$' + e.price : ''}</span>`;
+      }).join('');
+    }
+
     function renderCashierCard(order) {
       const statusMap = {
         new: { label: '新訂單', color: 'var(--amber)' },
@@ -122,9 +140,10 @@
         const mi = getItem(item.id);
         const nm = item.name || (mi && mi.name) || '未知品項';
         const price = (item.price != null ? item.price : (mi ? mi.price : 0));
+        const note = itemPureNote(item);
         return `
         <div style="display:flex;align-items:flex-start;justify-content:space-between;font-size:13px;padding:2px 0;">
-          <span>${nm}${item.temp ? `（${item.temp}）` : ''} ×${item.qty}${item.note ? `<span style="color:var(--amber);"> · 📝${escapeHtml(item.note)}</span>` : ''}</span>
+          <span>${nm}${item.temp ? `（${item.temp}）` : ''} ×${item.qty}${extrasChips(item)}${note ? `<span style="color:var(--amber);"> · 📝${escapeHtml(note)}</span>` : ''}</span>
           <span style="white-space:nowrap;">$${price * item.qty}</span>
         </div>
       `; }).join('');

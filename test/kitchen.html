@@ -133,6 +133,24 @@
       `;
     }
 
+    // ===== 訂單品項的加價選項（顧客點餐時選的「🥤換飲料／➕加購」）=====
+    // 送單時也會寫進 note 開頭當備援；有結構化的 extras 就把它從備註拆出來單獨標示
+    function itemExtras(it) { return Array.isArray(it.extras) ? it.extras.filter(e => e && e.name) : []; }
+    function extrasLabel(ex) { return ex.map(e => (e.drink ? '換' : '＋') + e.name).join('、'); }
+    function itemPureNote(it) {
+      const ex = itemExtras(it), note = it.note || '';
+      if (!ex.length) return note;
+      const lab = extrasLabel(ex);
+      if (note === lab) return '';
+      return note.indexOf(lab + '、') === 0 ? note.slice(lab.length + 1) : note;
+    }
+    function extrasChips(it) {
+      return itemExtras(it).map(e => {
+        const isDrink = !!e.drink;
+        return `<span style="display:inline-block;font-size:12px;font-weight:800;padding:1px 8px;border-radius:999px;margin-left:4px;background:${isDrink ? 'var(--blue-bg)' : 'var(--pink-bg)'};color:${isDrink ? 'var(--blue)' : 'var(--pink-deep)'};">${isDrink ? '🥤 換 ' : '➕ '}${escapeHtml(e.name)}${e.price ? ' +$' + e.price : ''}</span>`;
+      }).join('');
+    }
+
     function renderKitchenCard(order) {
       const statusMap = {
         new: { label: '新訂單', color: 'var(--amber)', bg: 'var(--pink-bg)' },
@@ -162,8 +180,8 @@
             ${order.phone ? `<span>·</span><span>📞 ${escapeHtml(order.phone)}</span>` : ''}
           </div>
           <div class="order-items">
-            ${order.items.map(item => { const mi = getItem(item.id); const nm = (mi && mi.name) || item.name || '未知品項'; return `
-              <div class="item-row"><span>${nm}${item.temp ? `（${item.temp}）` : ''}${item.note ? ` <span style="color:var(--amber);font-weight:700;">📝${escapeHtml(item.note)}</span>` : ''}</span><span>×${item.qty}</span></div>
+            ${order.items.map(item => { const mi = getItem(item.id); const nm = (mi && mi.name) || item.name || '未知品項'; const note = itemPureNote(item); return `
+              <div class="item-row"><span>${nm}${item.temp ? `（${item.temp}）` : ''}${extrasChips(item)}${note ? ` <span style="color:var(--amber);font-weight:700;">📝${escapeHtml(note)}</span>` : ''}</span><span>×${item.qty}</span></div>
             `; }).join('')}
             ${order.note ? `<div class="order-note">📝 ${escapeHtml(order.note)}</div>` : ''}
           </div>

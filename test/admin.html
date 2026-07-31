@@ -471,8 +471,41 @@
       return { dateStr, day, count: day.length, paidCount: paid.length, revenue: sum(paid), cashCount: cash.length, cashSum: sum(cash), mobileCount: mobile.length, mobileSum: sum(mobile), unpaidCount: day.length - paid.length, items };
     }
 
+    // ===== 訂單品項的加價選項（顧客點餐時選的「🥤換飲料／➕加購」）=====
+    // 送單時也會寫進 note 開頭當備援；有結構化的 extras 就把它從備註拆出來單獨標示
+    function itemExtras(it) { return Array.isArray(it.extras) ? it.extras.filter(e => e && e.name) : []; }
+    function extrasLabel(ex) { return ex.map(e => (e.drink ? '換' : '＋') + e.name).join('、'); }
+    function itemPureNote(it) {
+      const ex = itemExtras(it), note = it.note || '';
+      if (!ex.length) return note;
+      const lab = extrasLabel(ex);
+      if (note === lab) return '';
+      return note.indexOf(lab + '、') === 0 ? note.slice(lab.length + 1) : note;
+    }
+    function extrasChips(it) {
+      return itemExtras(it).map(e => {
+        const isDrink = !!e.drink;
+        return `<span style="display:inline-block;font-size:12px;font-weight:800;padding:1px 8px;border-radius:999px;margin-left:4px;background:${isDrink ? 'var(--blue-bg)' : 'var(--pink-bg)'};color:${isDrink ? 'var(--blue)' : 'var(--pink-deep)'};">${isDrink ? '🥤 換 ' : '➕ '}${escapeHtml(e.name)}${e.price ? ' +$' + e.price : ''}</span>`;
+      }).join('');
+    }
+    // 純文字版（列印日報表、同步 Google Sheet 用）
     function orderItemsText(o) {
-      return (o.items || []).map(it => nameOf(it) + (it.temp ? '(' + it.temp + ')' : '') + (it.note ? '[' + it.note + ']' : '') + '×' + it.qty).join('、');
+      return (o.items || []).map(it => {
+        const ex = itemExtras(it), note = itemPureNote(it);
+        return nameOf(it)
+          + (it.temp ? '(' + it.temp + ')' : '')
+          + (ex.length ? '(' + ex.map(e => (e.drink ? '換' : '＋') + e.name + '+$' + e.price).join('、') + ')' : '')
+          + (note ? '[' + note + ']' : '')
+          + '×' + it.qty;
+      }).join('、');
+    }
+    // HTML 版（後台歷史訂單表格用）：加價／換飲料獨立標示，跟顧客備註分開
+    function orderItemsHtml(o) {
+      if (!(o.items || []).length) return '—';
+      return (o.items || []).map(it => {
+        const note = itemPureNote(it);
+        return `<div style="margin-bottom:2px;">${escapeHtml(nameOf(it))}${it.temp ? '（' + escapeHtml(it.temp) + '）' : ''} ×${it.qty}${extrasChips(it)}${note ? `<span style="color:var(--amber);"> 📝${escapeHtml(note)}</span>` : ''}</div>`;
+      }).join('');
     }
     const payText = o => (o.pay && o.pay.paid) ? (o.pay.method === 'cash' ? '現金' : '行動') : '未結';
 
@@ -1017,12 +1050,12 @@
         const pd = o.pay && o.pay.paid;
         const payLabel = o.rejected ? '—' : (pd ? (o.pay.method === 'cash' ? '💵 現金' : '📱 行動') : '未結');
         const when = histScope === 'today' ? fmtTime(o.createdAt) : (fmtDate(o.createdAt) + ' ' + fmtTime(o.createdAt));
-        const itemsText = orderItemsText(o) || '—';
+        const itemsHtml = orderItemsHtml(o);
         return `<tr>
           <td style="font-weight:900;color:var(--pink);">${o.no}</td>
           <td>${when}</td>
           <td>${o.type} · ${escapeHtml(o.table || '')}</td>
-          <td style="font-size:12px;color:var(--ink-soft);max-width:280px;white-space:normal;line-height:1.5;">${escapeHtml(itemsText)}${o.note ? `<div style="color:var(--amber);">📝 ${escapeHtml(o.note)}</div>` : ''}</td>
+          <td style="font-size:12px;color:var(--ink-soft);max-width:280px;white-space:normal;line-height:1.5;">${itemsHtml}${o.note ? `<div style="color:var(--amber);">📝 ${escapeHtml(o.note)}</div>` : ''}</td>
           <td><span class="badge" style="background:${st.bg};color:${st.color};">${st.label}</span></td>
           <td style="color:${pd ? '#3fa877' : '#9db4bf'};font-weight:700;">${payLabel}</td>
           <td style="font-weight:900;text-align:right;">$${o.total}</td>
