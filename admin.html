@@ -101,6 +101,42 @@
       background: linear-gradient(90deg, #ec6398, #d84b84);
     }
 
+    /* 顧客端在線人數（右上角即時徽章） */
+    .live-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #eef4f7;
+      color: var(--ink-soft);
+      font-weight: 900;
+      font-size: 13px;
+      padding: 5px 11px;
+      border-radius: 999px;
+    }
+
+    .live-badge.on {
+      background: var(--green-bg);
+      color: var(--green);
+    }
+
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #b9cdd7;
+    }
+
+    .live-badge.on .live-dot {
+      background: var(--green);
+      animation: live-pulse 1.8s ease-out infinite;
+    }
+
+    @keyframes live-pulse {
+      0% { box-shadow: 0 0 0 0 rgba(63, 168, 119, .55); }
+      70% { box-shadow: 0 0 0 7px rgba(63, 168, 119, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(63, 168, 119, 0); }
+    }
+
     .admin-tabs {
       display: flex;
       gap: 8px;
@@ -309,6 +345,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script src="firebase-config.js"></script>
   <script src="shared.js"></script>
+  <script src="presence.js"></script>
   <script>document.head.insertAdjacentHTML('beforeend', '<style>' + getSharedStyles() + '</style>');</script>
   <script>
     const app = document.getElementById('app');
@@ -410,6 +447,10 @@
     let entAutoStatus = ''; // 同上，營運資料彈窗（員工/食材/設備/成本）
     let editEnt = null;  // 員工/食材/設備/成本編輯
     let histScope = 'today';
+    // 顧客端在線人數：presence.js 負責蒐集，這裡只管顯示
+    // （心跳每 60 秒一次，人離開後最多 2.5 分鐘會從數字裡消失）
+    let viewers = { total: 0, byPage: {} };
+
     let feedbacks = [];        // 顧客回饋清單（Firestore feedback 集合）
     let fbScope = 'all';       // 顧客回饋範圍：today / week / all
     let reportPeriod = 'day'; // 報表期間：day | week | month
@@ -1406,6 +1447,22 @@
       return html;
     }
 
+    // ---------- 顧客端在線人數 ----------
+    function viewersHtml() {
+      const n = viewers.total;
+      const names = Object.keys(viewers.byPage);
+      const detail = names.length
+        ? names.map(k => `${k} ${viewers.byPage[k]} 人`).join('、')
+        : '目前沒有人在點餐頁面';
+      return `<span class="live-badge${n ? ' on' : ''}" title="${detail}"><span class="live-dot"></span>👀 ${n} 人在看</span>`;
+    }
+
+    // 只換徽章本身，不重繪整個後台（避免每 15 秒把畫面重建一次）
+    function paintViewers() {
+      const el = document.getElementById('live-viewers');
+      if (el) el.innerHTML = viewersHtml();
+    }
+
     // ---------- 主渲染 ----------
     function renderAdmin() {
       // 記住捲動位置：整頁垂直 + 分頁橫桿(.admin-tabs)的橫向捲動，重建 DOM 後還原，避免點擊後跳回最前面
@@ -1420,7 +1477,10 @@
       const bodyFns = { revenue: tabRevenue, ops: tabOps, cost: tabCost, payroll: tabPayroll, ing: tabIng, equip: tabEquip, menu: tabMenu, addons: tabAddons, history: tabHistory, feedback: tabFeedback, announce: tabAnnounce };
       app.innerHTML = `
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
-          <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);">📊 ${syncModeLabel()} · 自動更新</div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--ink-soft);">
+            <span>📊 ${syncModeLabel()} · 自動更新</span>
+            <span id="live-viewers">${viewersHtml()}</span>
+          </div>
           <button id="logout-btn" class="pill-button">🔓 登出</button>
         </div>
         <div class="admin-tabs">${ADMIN_TABS.map(t => `<button class="admin-tab${t.k === aTab ? ' active' : ''}" data-tab="${t.k}">${t.label}</button>`).join('')}</div>
@@ -2098,6 +2158,11 @@
         try { feedbacks = JSON.parse(localStorage.getItem('xyg-feedback') || '[]'); } catch (e) {}
       }
     })();
+
+    // ---------- 顧客端在線人數（Firestore presence 集合）----------
+    if (window.xygPresence) {
+      xygPresence.watch(v => { viewers = v; paintViewers(); });
+    }
 
     function deleteFeedback(id) {
       const db = ensureDb();
