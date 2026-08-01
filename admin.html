@@ -1463,6 +1463,15 @@
       if (el) el.innerHTML = viewersHtml();
     }
 
+    // 連不上雲端時畫面只剩這台裝置的本機備份 → 講清楚紀錄還在，別讓人以為被刪了
+    function offlineNoticeHtml() {
+      if (typeof SYNC === 'undefined' || SYNC.mode === 'cloud') return '';
+      return `<div style="background:#fdf3e3;border:1px solid #f0d59b;color:#8a5b12;border-radius:14px;padding:11px 14px;margin-bottom:12px;font-size:13px;line-height:1.7;">
+        🔄 <b>目前連不上雲端</b>，以下顯示的是這台裝置的本機備份（${orders.length} 筆訂單）。<br>
+        雲端上的歷史訂單與營收紀錄不會因此消失，網路恢復後重新整理就會回來。
+      </div>`;
+    }
+
     // ---------- 主渲染 ----------
     function renderAdmin() {
       // 記住捲動位置：整頁垂直 + 分頁橫桿(.admin-tabs)的橫向捲動，重建 DOM 後還原，避免點擊後跳回最前面
@@ -1483,6 +1492,7 @@
           </div>
           <button id="logout-btn" class="pill-button">🔓 登出</button>
         </div>
+        ${offlineNoticeHtml()}
         <div class="admin-tabs">${ADMIN_TABS.map(t => `<button class="admin-tab${t.k === aTab ? ' active' : ''}" data-tab="${t.k}">${t.label}</button>`).join('')}</div>
         ${(bodyFns[aTab] || tabRevenue)()}
         ${renderModals()}
