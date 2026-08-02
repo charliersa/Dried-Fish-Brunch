@@ -345,6 +345,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script src="firebase-config.js"></script>
   <script src="core/shared.js"></script>
+  <script src="core/neworder-sound.js"></script>
   <script src="presence.js"></script>
   <script>document.head.insertAdjacentHTML('beforeend', '<style>' + getSharedStyles() + '</style>');</script>
   <script>
@@ -1463,6 +1464,79 @@
       if (el) el.innerHTML = viewersHtml();
     }
 
+    // ---------- 新訂單提示音（跟廚房後台同一套做法）----------
+    // 顧客手機／店內點餐送出後，這台後台要響鈴提醒
+    let soundEnabled = true;
+    try { soundEnabled = localStorage.getItem('xyg-admin-sound') !== 'off'; } catch (e) {}
+    // 提示音音檔（HTMLAudio，相容性最高）；使用者在本頁互動一次即解鎖，之後可自動播放
+    const _alertAudio = new Audio(window.ALERT_SOUND_URI || '');
+    _alertAudio.preload = 'auto';
+    // 音訊是否真的已解鎖（瀏覽器自動播放封鎖）；沒解鎖的話新訂單不會有聲音
+    let _audioReady = false;
+    function _markAudioReady(v) {
+      if (_audioReady === v) return;
+      _audioReady = v;
+      paintSound();
+    }
+    function _unlockAudio() {
+      try {
+        _alertAudio.volume = 0;
+        const p = _alertAudio.play();
+        if (p && p.then) p.then(() => {
+          _alertAudio.pause(); _alertAudio.currentTime = 0; _alertAudio.volume = 1;
+          _markAudioReady(true); // 真的播得出來才算解鎖
+        }).catch(() => { _alertAudio.volume = 1; });
+      } catch (e) { _alertAudio.volume = 1; }
+    }
+    document.addEventListener('touchend', _unlockAudio, { passive: true });
+    document.addEventListener('click', _unlockAudio, { passive: true });
+
+    function playNewOrderSound() {
+      try {
+        if (window.ALERT_SOUND_URI) {
+          _alertAudio.currentTime = 0;
+          _alertAudio.volume = 1;
+          const p = _alertAudio.play();
+          if (p) {
+            if (p.then) p.then(() => _markAudioReady(true));
+            // 播不出來 → 標記未解鎖（畫面會跳出警告按鈕）
+            if (p.catch) p.catch(() => _markAudioReady(false));
+          }
+        }
+      } catch (e) {}
+      if (navigator.vibrate) navigator.vibrate([120, 60, 120, 60, 200]);
+    }
+
+    function toggleSound() {
+      soundEnabled = !soundEnabled;
+      try { localStorage.setItem('xyg-admin-sound', soundEnabled ? 'on' : 'off'); } catch (e) {}
+      if (soundEnabled) { _unlockAudio(); playNewOrderSound(); } // 開啟時試響一聲並解鎖音訊
+      paintSound();
+    }
+
+    function soundHtml() {
+      return `<button class="pill-button" data-action="toggle-sound" style="cursor:pointer;padding:5px 11px;font-size:13px;">${soundEnabled ? '🔔 新單提示音：開' : '🔕 新單提示音：關'}</button>`
+        + ((soundEnabled && !_audioReady) ? `<button class="pill-button" data-action="enable-sound" style="cursor:pointer;padding:5px 11px;font-size:13px;border-color:#e05252;color:#e05252;font-weight:900;">⚠️ 提示音未啟用 — 點我測試</button>` : '');
+    }
+
+    // 只換這一小塊，不重繪整個後台（編輯彈窗開著時整頁重繪會打斷輸入）
+    function paintSound() {
+      const el = document.getElementById('sound-ctrl');
+      if (!el) return;
+      el.innerHTML = soundHtml();
+      el.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => handleAction(b)));
+    }
+
+    // 偵測是否有新的「新訂單」進來（首次同步不響，避免開後台時把既有訂單全部當成新單）
+    let _knownIds = null;
+    function checkNewOrders(list) {
+      const ids = new Set(list.map(o => o.id));
+      if (_knownIds === null) { _knownIds = ids; return; } // 第一次載入：只記錄不響
+      const hasNew = list.some(o => !_knownIds.has(o.id) && o.status === 'new' && !o.rejected);
+      _knownIds = ids;
+      if (hasNew && soundEnabled) playNewOrderSound();
+    }
+
     // 連不上雲端時畫面只剩這台裝置的本機備份 → 講清楚紀錄還在，別讓人以為被刪了
     function offlineNoticeHtml() {
       if (typeof SYNC === 'undefined' || SYNC.mode === 'cloud') return '';
@@ -1489,6 +1563,7 @@
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--ink-soft);">
             <span>📊 ${syncModeLabel()} · 自動更新</span>
             <span id="live-viewers">${viewersHtml()}</span>
+            <span id="sound-ctrl" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">${soundHtml()}</span>
           </div>
           <button id="logout-btn" class="pill-button">🔓 登出</button>
         </div>
@@ -1670,6 +1745,8 @@
       else if (a === 'ao-del') { deleteAddon(parseInt(b.dataset.idx, 10)); }
       else if (a === 'ao-up') { moveAddon(parseInt(b.dataset.idx, 10), -1); }
       else if (a === 'ao-down') { moveAddon(parseInt(b.dataset.idx, 10), 1); }
+      else if (a === 'toggle-sound') { toggleSound(); }
+      else if (a === 'enable-sound') { _unlockAudio(); playNewOrderSound(); } // 試響一聲，確認可以出聲
     }
 
     // ---------- 附加商品操作 ----------
@@ -2108,6 +2185,7 @@
 
     initSync(list => {
       orders = list;
+      checkNewOrders(list); // 有新訂單就響鈴提醒（不論在哪個分頁、有沒有登入畫面）
       if (unlocked && !editItem && !editEnt && !addonEdit) renderAdmin();
     });
 
