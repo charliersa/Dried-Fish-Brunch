@@ -867,6 +867,9 @@
       state.currentOrderId = order.id;
       state.cart = [];
       state.cartOpen = false;
+      // 送出流程結束就解鎖。以前只有「再點一單／回首頁」才會解鎖，一旦訂單被清掉、
+      // 畫面自動退回點餐頁，送出鍵就永遠沒反應，只能關掉重開。
+      state.submitting = false;
       showMessage('訂單已送出');
       renderCustomer();
     }
