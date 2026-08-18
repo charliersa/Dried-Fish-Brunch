@@ -331,6 +331,12 @@
     }
     document.addEventListener('touchend', _unlockAudio, { passive: true });
     document.addEventListener('click', _unlockAudio, { passive: true });
+    // 已授權過通知的裝置：開頁就自動更新推播 token，不必等第一次觸控。
+    // 以前要等有人碰螢幕才更新，早上都沒人碰的話，雲端存的還是舊 token，關店通知可能推不到
+    //（8/18 漏單那天，雲端就沒有任何一台當天更新過的 token）。
+    if ('Notification' in window && Notification.permission === 'granted') { _bpDone = true; registerBackendPush(); }
+    // 接單裝置螢幕不自動鎖定：鎖屏後 iOS 會無聲切斷連線，新單不響也不顯示
+    if (typeof keepScreenAwake === 'function') keepScreenAwake();
     // 註冊本裝置為「後端推播接收者」：授權通知→取得 token→存進 backendTokens
     // interactive=true（手動點按鈕）或首次授權成功時，會跳確認視窗
     async function registerBackendPush(interactive) {
