@@ -687,6 +687,8 @@ function restValue(v) {
 function startPollWatchdog() {
   if (SYNC.pollWatch) return;
   SYNC.pollWatch = setInterval(() => {
+    // 營運設定（菜單/成本/薪資）太久沒從串流送到 → 改用 REST 抓
+    if (CONFIG.mode === 'cloud' && Date.now() - (CONFIG.lastSnapAt || 0) > 25000) restPollConfig();
     if (SYNC.mode !== 'cloud') return;
     if (Date.now() - (SYNC.lastSnapAt || 0) < 25000) return; // 串流還活著
     restPollOrders();
@@ -1055,6 +1057,7 @@ function initConfig(onChange) {
   watchCloud('營運設定', (ok, fail) => db.collection('config').doc('admin').onSnapshot(
       snap => {
         ok();
+        CONFIG.lastSnapAt = Date.now(); // 穩定模式：串流還送得到設定，REST 輪詢就不出手
         let d = snap.exists ? snap.data() : null;
         if (!d) {
           // 啟用離線持久化後，開頁的第一個快照是從本機快取來的；快取是空的時候
@@ -1066,15 +1069,7 @@ function initConfig(onChange) {
           d = defaultConfig();
           db.collection('config').doc('admin').set(d).catch(() => {});
         }
-        d = normalizeConfig(d);
-        CONFIG.data = d;
-        CONFIG.loaded = true; // 雲端資料已到位，這之後存檔才安全
-        try { localStorage.setItem(CONFIG_LS, JSON.stringify(d)); } catch (e) {} // 本機備份，雲端被誤覆蓋時可救回
-        CURRENT_MENU = d.menu;
-        const json = JSON.stringify(d);
-        if (json === CONFIG._lastJson) return; // 設定沒變就不重畫
-        CONFIG._lastJson = json;
-        if (CONFIG.onChange) CONFIG.onChange(d);
+        applyCloudConfig(d);
       },
       err => {
         fail(err);
@@ -1083,6 +1078,39 @@ function initConfig(onChange) {
         if (!CONFIG.loaded) applyConfigLocally();
       }
     ));
+}
+
+// 套用一份「確定來自伺服器」的設定（串流快照或 REST 輪詢抓到的都走這裡）
+function applyCloudConfig(d) {
+  d = normalizeConfig(d);
+  CONFIG.data = d;
+  CONFIG.loaded = true; // 雲端資料已到位，這之後存檔才安全
+  try { localStorage.setItem(CONFIG_LS, JSON.stringify(d)); } catch (e) {} // 本機備份，雲端被誤覆蓋時可救回
+  CURRENT_MENU = d.menu;
+  const json = JSON.stringify(d);
+  if (json === CONFIG._lastJson) return; // 設定沒變就不重畫
+  CONFIG._lastJson = json;
+  if (CONFIG.onChange) CONFIG.onChange(d);
+}
+
+// 穩定模式（設定版）：串流太久沒送設定過來，就改用 REST 直連把 config/admin 抓下來套用。
+// 08/28 iPad Air 曾出現訂單串流正常、營運設定卻一直停在內建範例資料（成本/薪資顯示假數字），
+// 有這條保底後，設定最慢半分鐘內一定會變成雲端的真實資料。
+async function restPollConfig() {
+  if (CONFIG.mode !== 'cloud' || CONFIG.pollingCfg) return;
+  if (typeof FIREBASE_CONFIG === 'undefined' || !FIREBASE_CONFIG || !FIREBASE_CONFIG.apiKey) return;
+  CONFIG.pollingCfg = true;
+  try {
+    const res = await fetch('https://firestore.googleapis.com/v1/projects/' + FIREBASE_CONFIG.projectId
+      + '/databases/(default)/documents/config/admin?key=' + FIREBASE_CONFIG.apiKey);
+    if (!res.ok) return; // 404 = 雲端真的沒有設定文件，維持現狀交給串流判斷
+    const doc = await res.json();
+    if (!doc || !doc.fields) return;
+    CONFIG.lastSnapAt = Date.now();
+    applyCloudConfig(restParseFields(doc.fields));
+  } catch (e) {} finally {
+    CONFIG.pollingCfg = false;
+  }
 }
 
 // 用本機備份的設定把畫面撐起來。不動 CONFIG.mode、也不標記已載入，
