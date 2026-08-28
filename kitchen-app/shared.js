@@ -383,11 +383,12 @@ function ensureDb() {
     if (!_persistEnabled) {
       _persistEnabled = true;
       try {
-        // IG／LINE／FB 的內建瀏覽器和部分公用 Wi-Fi 會擋掉 Firestore 預設的串流連線
-        //（症狀是一直轉圈或收不到即時更新），偵測到就會自動改走長輪詢。
-        // 目前的 SDK（10.12.2）預設就是開的，這裡明寫是為了日後換版本時不會被預設值改掉。
+        // 店裡的 Wi-Fi 環境會讓 Firestore 預設的串流連線反覆莫名斷掉
+        //（08/28 實測：串流半死不活，寫入全靠備用通道 8~10 秒補送）。
+        // 「自動偵測」偵測不到這種半死狀態，改成強制走長輪詢：
+        // 每次通訊都是一般的 HTTP 請求，跟備用通道一樣凍不死，代價只是多零點幾秒。
         // 必須在任何資料操作之前設定，所以放在 enablePersistence 前面。
-        db.settings({ experimentalAutoDetectLongPolling: true, merge: true });
+        db.settings({ experimentalForceLongPolling: true, merge: true });
       } catch (e) { console.warn('Firestore 連線設定略過', e); }
       try {
         // 單分頁持久化：兩個站同在 charliersa.github.io，先前的 synchronizeTabs 會讓廚房／
@@ -632,7 +633,7 @@ function applyPendingOverlay(list) {
 }
 function pendSchedule() {
   if (_pendTimer) return;
-  _pendTimer = setInterval(pendFlush, 6000);
+  _pendTimer = setInterval(pendFlush, 3000);
 }
 function pendFlush() {
   const map = pendLoad();
@@ -640,7 +641,7 @@ function pendFlush() {
   if (!ids.length) { clearInterval(_pendTimer); _pendTimer = null; return; }
   ids.forEach(id => {
     const ent = map[id];
-    if (Date.now() - ent.ts < 4000) return; // 給 SDK 4 秒先送
+    if (Date.now() - ent.ts < 2000) return; // 給 SDK 2 秒先送
     restUpdateOrder(id, ent.changes)
       .then(() => pendConfirm(id, ent.changes))
       .catch(() => {}); // 打不通就等下一輪
@@ -689,11 +690,11 @@ function startPollWatchdog() {
   if (SYNC.pollWatch) return;
   SYNC.pollWatch = setInterval(() => {
     // 營運設定（菜單/成本/薪資）太久沒從串流送到 → 改用 REST 抓
-    if (CONFIG.mode === 'cloud' && Date.now() - (CONFIG.lastSnapAt || 0) > 25000) restPollConfig();
+    if (CONFIG.mode === 'cloud' && Date.now() - (CONFIG.lastSnapAt || 0) > 15000) restPollConfig();
     if (SYNC.mode !== 'cloud') return;
-    if (Date.now() - (SYNC.lastSnapAt || 0) < 25000) return; // 串流還活著
+    if (Date.now() - (SYNC.lastSnapAt || 0) < 15000) return; // 串流還活著
     restPollOrders();
-  }, 10000);
+  }, 6000);
 }
 async function restPollOrders() {
   if (SYNC.polling) return;
