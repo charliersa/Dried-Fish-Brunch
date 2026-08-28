@@ -909,9 +909,22 @@
       if (!state.currentOrderId && !state.activeItem && !state.cartOpen) updateActiveCat();
     }, { passive: true });
 
+    // 手機顧客送來新訂單 → 店內點餐機也響鈴提醒（店主要求：平板停在哪一頁都要聽得到）
+    let _bellKnownIds = null;
+    function checkNewOrdersBell(list) {
+      const ids = new Set(list.map(o => o.id));
+      if (_bellKnownIds === null) { _bellKnownIds = ids; return; } // 第一次載入只記錄不響
+      const hasNew = list.some(o => !_bellKnownIds.has(o.id) && o.status === 'new' && !o.rejected);
+      _bellKnownIds = ids;
+      if (hasNew) {
+        try { _alertAudio.currentTime = 0; _alertAudio.volume = 1; const p = _alertAudio.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+      }
+    }
+
     renderCustomer();
     initSync(list => {
       orders = list;
+      checkNewOrdersBell(list); // 新訂單響鈴（店內機提醒用）
       checkMyOrderReady(list); // 餐點完成 → 響鈴通知顧客
       // 看狀態頁或叫號板時，雲端更新要即時反映（叫號板會自動更新）
       if (state.currentOrderId || state.showBoard) renderCustomer();

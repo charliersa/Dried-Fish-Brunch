@@ -194,9 +194,22 @@
       `;
     }
 
+    // 新訂單也要響鈴：平板不管停在哪一頁都聽得到新單進來
+    let _knownIds = null;
+    function checkNewOrders(list) {
+      const ids = new Set(list.map(o => o.id));
+      if (_knownIds === null) { _knownIds = ids; return; } // 第一次載入只記錄不響
+      const hasNew = list.some(o => !_knownIds.has(o.id) && o.status === 'new' && !o.rejected);
+      _knownIds = ids;
+      if (hasNew) {
+        try { _alertAudio.currentTime = 0; _alertAudio.volume = 1; const p = _alertAudio.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+      }
+    }
+
     renderDisplay();
     initSync(list => {
       orders = list;
+      checkNewOrders(list); // 新訂單響鈴
       renderDisplay();
     }, { today: true });
 
