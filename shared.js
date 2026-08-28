@@ -200,12 +200,22 @@ const NET = {
   hiddenAt: 0,      // 分頁切到背景的時間
   bound: false,
   kicking: false,
+  offlineSince: 0,  // 這次斷線從什麼時候開始（0 = 目前連著）
+  kickWait: 0,      // 下次主動重連前要等多久（連續救不回來就加倍）
+  patrol: null,     // 連線巡邏計時器
   banner: null,
   timer: null,
 };
 
 // 註冊一個會自動重連的即時監聽。
 // start(ok, fail) 要回傳 onSnapshot 的取消訂閱函式；收到快照時呼叫 ok()，出錯時呼叫 fail(err)。
+// 主動重連的等待時間：第一次等 20 秒，之後每次加倍，最多 5 分鐘才試一次。
+// 會退避是因為管理後台訂閱的是「全部歷史訂單」，每次重連都要整批重讀；
+// 一條長期壞掉的連線若每 20 秒重讀一次，反而會把 Firestore 的免費額度吃掉。
+const NET_REVIVE_MIN = 20000;
+const NET_REVIVE_MAX = 300000;
+const NET_PATROL_MS = 5000;
+
 function watchCloud(name, start) {
   const w = { name: name, start: start, unsub: null, retry: 0, timer: null };
   NET.watchers.push(w);
@@ -265,9 +275,31 @@ function setCloudOnline(on) {
   if (NET.online === on) return;
   NET.online = on;
   if (NET.timer) { clearTimeout(NET.timer); NET.timer = null; }
-  if (on) { renderNetBanner(); return; }
+  if (on) { NET.offlineSince = 0; NET.kickWait = 0; renderNetBanner(); return; }
+  NET.offlineSince = Date.now();
+  startNetPatrol();
   // 剛開頁時第一個快照本來就來自本機快取，等 8 秒還沒連上才提示，避免每次開啟都閃一下
   NET.timer = setTimeout(() => { NET.timer = null; renderNetBanner(); }, 8000);
+}
+
+// 連線巡邏：分頁一直開著沒切走時（廚房 iPad、收銀電腦就是這樣整天開著），
+// 斷線不會觸發 online／visibilitychange／pageshow 任何一個事件，而 Firestore
+// 這種「靜靜斷掉」也不回報錯誤，openWatcher 的 fail 分支同樣不會進去 ——
+// 結果就是橫幅掛在畫面上說「會自動恢復」，卻沒有任何人真的去重連，
+// 店員只好把網頁關掉重開。這裡自己定時巡邏，斷線夠久就主動 kickCloud()。
+function startNetPatrol() {
+  if (NET.patrol) return;
+  NET.patrol = setInterval(() => {
+    if (NET.online) { clearInterval(NET.patrol); NET.patrol = null; return; }
+    if (NET.kicking || !NET.offlineSince) return;
+    if (document.visibilityState === 'hidden') return; // 背景分頁交給回前景時的 visibilitychange 處理
+    const wait = NET.kickWait || NET_REVIVE_MIN;
+    if (Date.now() - NET.offlineSince < wait) return;
+    NET.kickWait = Math.min(wait * 2, NET_REVIVE_MAX);
+    NET.offlineSince = Date.now(); // 重新計時，等這一次重連的結果
+    console.warn('[net] 斷線超過 ' + Math.round(wait / 1000) + ' 秒且沒有任何事件觸發，主動重連');
+    kickCloud();
+  }, NET_PATROL_MS);
 }
 
 // 斷線時在畫面最上方顯示提示。重點是告訴店員／顧客「會自動恢復，不用關掉重開」——
