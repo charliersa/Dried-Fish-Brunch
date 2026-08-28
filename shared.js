@@ -471,6 +471,7 @@ function initSync(onChange, opts) {
   SYNC.mode = 'cloud';
   SYNC.todayOnly = !!opts.today;
   SYNC.lastSnapAt = Date.now();
+  expireStaleBackup(); // 太久沒更新的本機備份直接作廢，避免斷線時顯示舊數字
   pendSchedule(); // 上次沒送出去的狀態變更（重新整理前卡住的），開頁就繼續補送
   startPollWatchdog(); // 穩定模式：即時串流凍死時自動改用 REST 輪詢收單
   let hadData = false;
@@ -513,6 +514,27 @@ function backupOrders(list, todayOnly) {
       ? loadOrders().filter(o => !isToday(o.createdAt)).concat(list)
       : list;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    localStorage.setItem(BACKUP_AT_KEY, String(Date.now())); // 記下備份時間，太舊會自動作廢
+  } catch (e) {}
+}
+
+// ===== 過期備份自動刪除 =====
+// 本機備份只是雲端的快取（雲端才是正本），每次連上都會自動更新。
+// 但裝置若太久沒連上雲端，備份會停在好幾天前 —— 拿出來顯示只會誤導
+//（08/28 平板就顯示過幾天前的舊菜單和舊報表）。超過 3 天沒更新就整份刪掉：
+// 寧可顯示「連不上雲端、沒有資料」，也不要顯示舊數字。
+const BACKUP_AT_KEY = 'xyg-backup-at';
+function expireStaleBackup() {
+  try {
+    const has = localStorage.getItem(STORAGE_KEY);
+    if (!has) return;
+    const at = Number(localStorage.getItem(BACKUP_AT_KEY) || 0);
+    if (!at) { localStorage.setItem(BACKUP_AT_KEY, String(Date.now())); return; } // 舊版沒記時間：現在起算
+    if (Date.now() - at > 3 * 86400000) {
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(BACKUP_AT_KEY);
+      console.warn('本機備份超過 3 天沒更新，已自動刪除（雲端資料不受影響）');
+    }
   } catch (e) {}
 }
 
