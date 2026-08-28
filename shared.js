@@ -469,6 +469,7 @@ function initSync(onChange, opts) {
   if (!db) { startLocalSync(); return; }
   SYNC.db = db;
   SYNC.mode = 'cloud';
+  pendSchedule(); // 上次沒送出去的狀態變更（重新整理前卡住的），開頁就繼續補送
   let hadData = false;
   // 交給 watchCloud 管理：斷線只會重連，不會切成本機模式（切過去就再也不會把訂單送上雲端）
   watchCloud('訂單', (ok, fail) => {
@@ -481,7 +482,8 @@ function initSync(onChange, opts) {
       snap => {
         ok();
         hadData = true;
-        const list = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
+        // 先套上「保證送達佇列」裡還沒確認的狀態變更，畫面才不會倒退回舊狀態
+        const list = applyPendingOverlay(snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data())));
         backupOrders(list, !!opts.today);
         if (SYNC.onChange) SYNC.onChange(list);
       },
@@ -489,7 +491,7 @@ function initSync(onChange, opts) {
         fail(err);
         // 還沒拿到任何雲端資料就斷線 → 先用本機備份把畫面撐住，但不切換成本機模式：
         // 送出的訂單仍然交給 Firestore 排隊，連上後會自動補送到廚房。
-        if (!hadData && SYNC.onChange) SYNC.onChange(loadOrders());
+        if (!hadData && SYNC.onChange) SYNC.onChange(applyPendingOverlay(loadOrders()));
       }
     );
   });
@@ -533,14 +535,120 @@ function syncAddOrder(order) {
 
 function syncUpdateOrder(id, changes) {
   if (SYNC.mode === 'cloud' && SYNC.db) {
+    pendRemember(id, changes); // 先記帳：畫面不倒退、SDK 送不出去也會自動補送（見下方保證送達佇列）
     return SYNC.db.collection('orders').doc(String(id)).update(changes)
-      .catch(e => console.warn('更新訂單失敗', e));
+      .then(() => pendConfirm(id, changes)) // 伺服器真的收到才銷帳
+      .catch(e => console.warn('更新訂單失敗（已排入自動補送）', e));
   }
   const orders = loadOrders();
   const order = orders.find(o => o.id === id);
   if (order) { Object.assign(order, changes); saveOrders(orders); }
   if (SYNC.onChange) SYNC.onChange(orders);
   return Promise.resolve();
+}
+
+// ===== 訂單狀態變更「保證送達」佇列 =====
+// 平板連線不穩時，「完成／取餐」的 update 會卡在 SDK 佇列送不出去；單分頁持久化下
+// 重新整理還會把佇列直接丟掉，雲端快照一回來就把舊狀態蓋回畫面 —— 店員看到做完的單
+// 「來來回回」跑回來。這裡把每筆狀態變更記進 localStorage（重新整理不丟）：
+// ① 快照回來先套用記帳中的變更，畫面永遠不倒退
+// ② SDK 4 秒內送不出去，改走 Firestore REST 直連通道補送（每 6 秒重試）
+// ③ 伺服器確認收到（SDK 回應、REST 200 或快照已反映）才銷帳
+const PEND_KEY = 'xyg-pend-upd';
+let _pendTimer = null;
+function pendLoad() { try { return JSON.parse(localStorage.getItem(PEND_KEY) || '{}'); } catch (e) { return {}; } }
+function pendSave(map) { try { localStorage.setItem(PEND_KEY, JSON.stringify(map)); } catch (e) {} }
+function pendRemember(id, changes) {
+  const map = pendLoad();
+  const ent = map[String(id)] || { changes: {}, ts: 0 };
+  Object.assign(ent.changes, changes);
+  ent.ts = Date.now();
+  map[String(id)] = ent;
+  pendSave(map);
+  pendSchedule();
+}
+function pendConfirm(id, confirmed) {
+  const map = pendLoad();
+  const ent = map[String(id)];
+  if (!ent) return;
+  Object.keys(confirmed).forEach(k => {
+    if (JSON.stringify(ent.changes[k]) === JSON.stringify(confirmed[k])) delete ent.changes[k];
+  });
+  if (!Object.keys(ent.changes).filter(k => k !== 'updatedAt').length) delete map[String(id)];
+  pendSave(map);
+}
+// 把記帳中的變更蓋到快照清單上；伺服器已反映的欄位順手銷帳
+function applyPendingOverlay(list) {
+  const map = pendLoad();
+  const ids = Object.keys(map);
+  if (!ids.length) return list;
+  let dirty = false;
+  ids.forEach(id => {
+    const ent = map[id];
+    if (Date.now() - ent.ts > 86400000) { delete map[id]; dirty = true; return; } // 超過一天的舊帳放棄
+    const order = list.find(o => String(o.id) === id);
+    if (!order) return;
+    Object.keys(ent.changes).forEach(k => {
+      if (k === 'updatedAt') return;
+      if (JSON.stringify(order[k]) === JSON.stringify(ent.changes[k])) {
+        delete ent.changes[k]; dirty = true; // 伺服器已反映 → 銷帳
+      } else {
+        order[k] = ent.changes[k]; // 還沒反映 → 蓋住，不讓舊狀態倒退
+      }
+    });
+    if (!Object.keys(ent.changes).filter(k => k !== 'updatedAt').length) { delete map[id]; dirty = true; }
+  });
+  if (dirty) pendSave(map);
+  return list;
+}
+function pendSchedule() {
+  if (_pendTimer) return;
+  _pendTimer = setInterval(pendFlush, 6000);
+}
+function pendFlush() {
+  const map = pendLoad();
+  const ids = Object.keys(map);
+  if (!ids.length) { clearInterval(_pendTimer); _pendTimer = null; return; }
+  ids.forEach(id => {
+    const ent = map[id];
+    if (Date.now() - ent.ts < 4000) return; // 給 SDK 4 秒先送
+    restUpdateOrder(id, ent.changes)
+      .then(() => pendConfirm(id, ent.changes))
+      .catch(() => {}); // 打不通就等下一輪
+  });
+}
+// 用 REST 直連通道只更新有變更的欄位（updateMask），且訂單必須已存在雲端（不產生半張幽靈單）
+function restUpdateOrder(id, changes) {
+  if (typeof FIREBASE_CONFIG === 'undefined' || !FIREBASE_CONFIG || !FIREBASE_CONFIG.apiKey) return Promise.reject(new Error('no config'));
+  const keys = Object.keys(changes).filter(k => changes[k] !== undefined);
+  if (!keys.length) return Promise.resolve();
+  const qs = keys.map(k => 'updateMask.fieldPaths=' + encodeURIComponent(k)).join('&');
+  const url = 'https://firestore.googleapis.com/v1/projects/' + FIREBASE_CONFIG.projectId
+    + '/databases/(default)/documents/orders/' + encodeURIComponent(String(id))
+    + '?currentDocument.exists=true&' + qs + '&key=' + FIREBASE_CONFIG.apiKey;
+  return fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields: restFields(changes) }),
+  }).then(res => { if (!res.ok) throw new Error('REST ' + res.status); });
+}
+function restFields(obj) {
+  const out = {};
+  Object.keys(obj).forEach(k => {
+    const v = restValue(obj[k]);
+    if (v) out[k] = v;
+  });
+  return out;
+}
+function restValue(v) {
+  if (v === undefined) return null; // undefined 欄位直接略過
+  if (v === null) return { nullValue: null };
+  if (typeof v === 'boolean') return { booleanValue: v };
+  if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (typeof v === 'string') return { stringValue: v };
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(restValue).filter(Boolean) } };
+  if (typeof v === 'object') return { mapValue: { fields: restFields(v) } };
+  return null;
 }
 
 // ===== 訂單送達確認（顧客端「店家已接收」用）=====

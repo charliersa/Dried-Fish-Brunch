@@ -469,6 +469,7 @@ function initSync(onChange, opts) {
   if (!db) { startLocalSync(); return; }
   SYNC.db = db;
   SYNC.mode = 'cloud';
+  pendSchedule(); // 上次沒送出去的狀態變更（重新整理前卡住的），開頁就繼續補送
   let hadData = false;
   // 交給 watchCloud 管理：斷線只會重連，不會切成本機模式（切過去就再也不會把訂單送上雲端）
   watchCloud('訂單', (ok, fail) => {
@@ -481,7 +482,8 @@ function initSync(onChange, opts) {
       snap => {
         ok();
         hadData = true;
-        const list = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
+        // 先套上「保證送達佇列」裡還沒確認的狀態變更，畫面才不會倒退回舊狀態
+        const list = applyPendingOverlay(snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data())));
         backupOrders(list, !!opts.today);
         if (SYNC.onChange) SYNC.onChange(list);
       },
@@ -489,7 +491,7 @@ function initSync(onChange, opts) {
         fail(err);
         // 還沒拿到任何雲端資料就斷線 → 先用本機備份把畫面撐住，但不切換成本機模式：
         // 送出的訂單仍然交給 Firestore 排隊，連上後會自動補送到廚房。
-        if (!hadData && SYNC.onChange) SYNC.onChange(loadOrders());
+        if (!hadData && SYNC.onChange) SYNC.onChange(applyPendingOverlay(loadOrders()));
       }
     );
   });
@@ -533,14 +535,120 @@ function syncAddOrder(order) {
 
 function syncUpdateOrder(id, changes) {
   if (SYNC.mode === 'cloud' && SYNC.db) {
+    pendRemember(id, changes); // 先記帳：畫面不倒退、SDK 送不出去也會自動補送（見下方保證送達佇列）
     return SYNC.db.collection('orders').doc(String(id)).update(changes)
-      .catch(e => console.warn('更新訂單失敗', e));
+      .then(() => pendConfirm(id, changes)) // 伺服器真的收到才銷帳
+      .catch(e => console.warn('更新訂單失敗（已排入自動補送）', e));
   }
   const orders = loadOrders();
   const order = orders.find(o => o.id === id);
   if (order) { Object.assign(order, changes); saveOrders(orders); }
   if (SYNC.onChange) SYNC.onChange(orders);
   return Promise.resolve();
+}
+
+// ===== 訂單狀態變更「保證送達」佇列 =====
+// 平板連線不穩時，「完成／取餐」的 update 會卡在 SDK 佇列送不出去；單分頁持久化下
+// 重新整理還會把佇列直接丟掉，雲端快照一回來就把舊狀態蓋回畫面 —— 店員看到做完的單
+// 「來來回回」跑回來。這裡把每筆狀態變更記進 localStorage（重新整理不丟）：
+// ① 快照回來先套用記帳中的變更，畫面永遠不倒退
+// ② SDK 4 秒內送不出去，改走 Firestore REST 直連通道補送（每 6 秒重試）
+// ③ 伺服器確認收到（SDK 回應、REST 200 或快照已反映）才銷帳
+const PEND_KEY = 'xyg-pend-upd';
+let _pendTimer = null;
+function pendLoad() { try { return JSON.parse(localStorage.getItem(PEND_KEY) || '{}'); } catch (e) { return {}; } }
+function pendSave(map) { try { localStorage.setItem(PEND_KEY, JSON.stringify(map)); } catch (e) {} }
+function pendRemember(id, changes) {
+  const map = pendLoad();
+  const ent = map[String(id)] || { changes: {}, ts: 0 };
+  Object.assign(ent.changes, changes);
+  ent.ts = Date.now();
+  map[String(id)] = ent;
+  pendSave(map);
+  pendSchedule();
+}
+function pendConfirm(id, confirmed) {
+  const map = pendLoad();
+  const ent = map[String(id)];
+  if (!ent) return;
+  Object.keys(confirmed).forEach(k => {
+    if (JSON.stringify(ent.changes[k]) === JSON.stringify(confirmed[k])) delete ent.changes[k];
+  });
+  if (!Object.keys(ent.changes).filter(k => k !== 'updatedAt').length) delete map[String(id)];
+  pendSave(map);
+}
+// 把記帳中的變更蓋到快照清單上；伺服器已反映的欄位順手銷帳
+function applyPendingOverlay(list) {
+  const map = pendLoad();
+  const ids = Object.keys(map);
+  if (!ids.length) return list;
+  let dirty = false;
+  ids.forEach(id => {
+    const ent = map[id];
+    if (Date.now() - ent.ts > 86400000) { delete map[id]; dirty = true; return; } // 超過一天的舊帳放棄
+    const order = list.find(o => String(o.id) === id);
+    if (!order) return;
+    Object.keys(ent.changes).forEach(k => {
+      if (k === 'updatedAt') return;
+      if (JSON.stringify(order[k]) === JSON.stringify(ent.changes[k])) {
+        delete ent.changes[k]; dirty = true; // 伺服器已反映 → 銷帳
+      } else {
+        order[k] = ent.changes[k]; // 還沒反映 → 蓋住，不讓舊狀態倒退
+      }
+    });
+    if (!Object.keys(ent.changes).filter(k => k !== 'updatedAt').length) { delete map[id]; dirty = true; }
+  });
+  if (dirty) pendSave(map);
+  return list;
+}
+function pendSchedule() {
+  if (_pendTimer) return;
+  _pendTimer = setInterval(pendFlush, 6000);
+}
+function pendFlush() {
+  const map = pendLoad();
+  const ids = Object.keys(map);
+  if (!ids.length) { clearInterval(_pendTimer); _pendTimer = null; return; }
+  ids.forEach(id => {
+    const ent = map[id];
+    if (Date.now() - ent.ts < 4000) return; // 給 SDK 4 秒先送
+    restUpdateOrder(id, ent.changes)
+      .then(() => pendConfirm(id, ent.changes))
+      .catch(() => {}); // 打不通就等下一輪
+  });
+}
+// 用 REST 直連通道只更新有變更的欄位（updateMask），且訂單必須已存在雲端（不產生半張幽靈單）
+function restUpdateOrder(id, changes) {
+  if (typeof FIREBASE_CONFIG === 'undefined' || !FIREBASE_CONFIG || !FIREBASE_CONFIG.apiKey) return Promise.reject(new Error('no config'));
+  const keys = Object.keys(changes).filter(k => changes[k] !== undefined);
+  if (!keys.length) return Promise.resolve();
+  const qs = keys.map(k => 'updateMask.fieldPaths=' + encodeURIComponent(k)).join('&');
+  const url = 'https://firestore.googleapis.com/v1/projects/' + FIREBASE_CONFIG.projectId
+    + '/databases/(default)/documents/orders/' + encodeURIComponent(String(id))
+    + '?currentDocument.exists=true&' + qs + '&key=' + FIREBASE_CONFIG.apiKey;
+  return fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields: restFields(changes) }),
+  }).then(res => { if (!res.ok) throw new Error('REST ' + res.status); });
+}
+function restFields(obj) {
+  const out = {};
+  Object.keys(obj).forEach(k => {
+    const v = restValue(obj[k]);
+    if (v) out[k] = v;
+  });
+  return out;
+}
+function restValue(v) {
+  if (v === undefined) return null; // undefined 欄位直接略過
+  if (v === null) return { nullValue: null };
+  if (typeof v === 'boolean') return { booleanValue: v };
+  if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (typeof v === 'string') return { stringValue: v };
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(restValue).filter(Boolean) } };
+  if (typeof v === 'object') return { mapValue: { fields: restFields(v) } };
+  return null;
 }
 
 // ===== 訂單送達確認（顧客端「店家已接收」用）=====
@@ -709,13 +817,14 @@ const CONFIG = { db: null, mode: 'local', onChange: null, pollTimer: null, data:
 function isConfigLoaded() { return CONFIG.mode !== 'cloud' || CONFIG.loaded; }
 
 function defaultConfig() {
-  return { menu: CURRENT_MENU, ent: JSON.parse(JSON.stringify(DEFAULT_ENT)), closeTime: '11:50', closeEnabled: false };
+  return { menu: CURRENT_MENU, ent: JSON.parse(JSON.stringify(DEFAULT_ENT)), closeTime: '11:50', closeEnabled: false, announcements: [] };
 }
 
 function normalizeConfig(d) {
   if (!d) d = defaultConfig();
   d.menu = (d.menu && d.menu.length) ? d.menu : CURRENT_MENU;
   d.ent = Object.assign({ staff: [], ingredients: [], equipment: [], costs: [] }, d.ent || {});
+  d.announcements = Array.isArray(d.announcements) ? d.announcements : []; // 公告欄（後台手動新增）
   d.closeTime = d.closeTime || '11:50'; // 結單時間（HH:MM）：啟用後此時間起顧客停止點餐
   if (typeof d.closeEnabled !== 'boolean') d.closeEnabled = false; // 結單開關，預設關閉（暫停）
   return d;
@@ -739,6 +848,98 @@ function isOrderingClosed(time) {
   const limit = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
   const d = time ? new Date(time) : new Date();
   return (d.getHours() * 60 + d.getMinutes()) >= limit;
+}
+
+// ===== 公告欄：後台手動新增的公告，隨營運設定一起同步到顧客點餐頁 =====
+// 每則公告：{ id, text, type: 'info' | 'warn' | 'promo', active, createdAt }
+// 陣列順序就是顯示順序（後台可上移／下移）
+const ANNOUNCE_TYPES = {
+  info: { label: '一般', icon: '📢', bg: '#e3f1fb', line: '#3e9bd1', ink: '#1c5e7a' },
+  warn: { label: '重要', icon: '⚠️', bg: '#fdecea', line: '#e5534b', ink: '#b3322b' },
+  promo: { label: '優惠', icon: '🎉', bg: '#fceaf1', line: '#ec6398', ink: '#d84b84' },
+};
+function announceStyle(type) { return ANNOUNCE_TYPES[type] || ANNOUNCE_TYPES.info; }
+
+// all=true 連隱藏的一起回傳（後台管理用）；預設只回顧客看得到的
+function getAnnouncements(all) {
+  const list = (CONFIG.data && Array.isArray(CONFIG.data.announcements)) ? CONFIG.data.announcements : [];
+  return all ? list : list.filter(a => a && a.active !== false && String(a.text || '').trim());
+}
+
+function saveAnnouncements(list) {
+  return saveConfig(Object.assign({}, CONFIG.data || defaultConfig(), { announcements: list }));
+}
+
+// 公告卡片列表 HTML（懸浮視窗與後台預覽共用）；沒有公告回空字串
+function renderAnnouncementItems() {
+  return getAnnouncements().map(a => {
+    const s = announceStyle(a.type);
+    return `<div class="ann-item" style="background:${s.bg};border-left:4px solid ${s.line};color:${s.ink};">
+        <span class="ann-icon">${s.icon}</span>
+        <div class="ann-text">${escapeHtml(a.text).replace(/\n/g, '<br>')}</div>
+      </div>`;
+  }).join('');
+}
+
+// ---- 懸浮公告視窗：按標題列的「📢 店家公告」才打開 ----
+function isAnnouncementsOpen() {
+  const slot = document.getElementById('ann-modal');
+  return !!(slot && slot.firstChild);
+}
+
+function openAnnouncements() {
+  const slot = document.getElementById('ann-modal');
+  if (!slot) return;
+  const rows = renderAnnouncementItems();
+  slot.innerHTML = `
+    <div class="ann-mask">
+      <div class="ann-window" role="dialog" aria-label="店家公告">
+        <div class="ann-window-head">
+          <span class="ann-window-title">📌 店家公告</span>
+          <button type="button" class="ann-close" aria-label="關閉">✕</button>
+        </div>
+        <div class="ann-window-body">${rows || '<div class="ann-empty">目前沒有公告</div>'}</div>
+      </div>
+    </div>`;
+  // 點遮罩空白處或右上角 ✕ 都可關閉；點視窗內容不關
+  const mask = slot.querySelector('.ann-mask');
+  if (mask) mask.addEventListener('click', e => { if (e.target === mask) closeAnnouncements(); });
+  const x = slot.querySelector('.ann-close');
+  if (x) x.addEventListener('click', closeAnnouncements);
+  document.body.style.overflow = 'hidden'; // 視窗開著時背景不跟著捲
+}
+
+function closeAnnouncements() {
+  const slot = document.getElementById('ann-modal');
+  if (slot) slot.innerHTML = '';
+  document.body.style.overflow = '';
+}
+
+// 顧客開啟點餐頁時是否已自動跳過公告；每次載入頁面只強制跳一次，
+// 之後設定再同步（例如店家改菜單）都不會又彈出來打斷點餐。
+let _annAutoOpened = false;
+
+// 更新標題列的公告按鈕（有幾則、要不要顯示），並在視窗開著時同步內容。
+// 設定每次同步都會呼叫，所以後台一改，顧客這邊的按鈕與視窗都會跟著變。
+function syncAnnouncementUI() {
+  const list = getAnnouncements();
+  const pill = document.getElementById('ann-pill');
+  if (pill) {
+    pill.style.display = list.length ? '' : 'none'; // 沒公告就不佔版面
+    pill.innerHTML = `📢 店家公告${list.length > 1 ? `<span class="ann-badge">${list.length}</span>` : ''}`;
+    if (!pill.dataset.bound) {
+      pill.dataset.bound = '1';
+      pill.addEventListener('click', openAnnouncements);
+      document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAnnouncements(); });
+    }
+  }
+  if (isAnnouncementsOpen()) { openAnnouncements(); return; } // 開著就重畫成最新內容
+  // 顧客一開頁面就強制跳出公告（只有掛了 #ann-modal 的顧客點餐頁會生效，
+  // 廚房／收銀／叫號／後台沒有掛載點，openAnnouncements 會直接略過）
+  if (!_annAutoOpened && list.length) {
+    _annAutoOpened = true;
+    openAnnouncements();
+  }
 }
 
 // 註冊營運設定變更監聽；callback 帶入 { menu, ent }
@@ -827,6 +1028,35 @@ function saveMenu(menu) {
 }
 function saveEnt(ent) {
   return saveConfig(Object.assign({}, CONFIG.data || defaultConfig(), { ent }));
+}
+
+// ===== 品項小圖示 =====
+// 菜單是從雲端讀的（後台隨時可改、可新增），所以不在資料裡多存 icon 欄位，
+// 改成顯示時依品名關鍵字自動判斷 —— 後台新增品項不必再挑一次圖示。
+// 比對順序由主餐到飲料：套餐名稱像「蔬菜蛋+雞塊3個+紅茶」時要取主餐（蔬菜），
+// 不能被結尾的附餐飲料搶走。
+const ITEM_ICONS = [
+  ['酪梨', '🥑'], ['蔬菜', '🥬'], ['起司', '🧀'], ['玉米', '🌽'],
+  ['草莓', '🍓'], ['蔥花', '🌿'],
+  ['豬排', '🥓'], ['豬肉', '🥓'], ['鮪魚', '🐟'], ['雞腿', '🍗'], ['麥香雞', '🍗'],
+  ['泡菜', '🌶️'], ['香菇', '🍄'], ['蘿蔔糕', '🍥'],
+  ['薯條', '🍟'], ['雞塊', '🍗'],
+  ['荷包蛋', '🍳'], ['水煮蛋', '🥚'],
+  ['三明治', '🥪'], ['抓餅', '🫓'], ['蛋餅', '🥞'], ['吐司', '🍞'],
+  ['蛋', '🥚'],
+  ['鮮奶茶', '🧋'], ['奶茶', '🧋'], ['紅茶', '🍵'], ['豆漿', '🥛'], ['咖啡', '☕'],
+];
+
+// 品名開頭本來就有圖案時（例如「👍香菇蘿蔔糕 ❤️價格優惠中」）就不再加，免得兩個圖案並排
+const LEADING_EMOJI = /^[🌀-🫿☀-➿⬀-⯿]/u;
+
+function itemIcon(category, item) {
+  const name = (item && item.name) || '';
+  if (!name || LEADING_EMOJI.test(name)) return '';
+  for (let i = 0; i < ITEM_ICONS.length; i++) {
+    if (name.indexOf(ITEM_ICONS[i][0]) !== -1) return ITEM_ICONS[i][1];
+  }
+  return (category && category.icon) || ''; // 關鍵字都對不上 → 沿用分類圖示，不會開天窗
 }
 
 function getItem(itemId) {
@@ -939,6 +1169,62 @@ async function nextDailyNo() {
   }
 }
 
+// ===== 取餐通知狀態：決定要跟顧客說「可以關掉頁面」還是「請保持畫面開啟」=====
+// iOS 的網頁推播只有把網站「加入主畫面」後才收得到，Safari 分頁裡拿不到權限
+function isIOSDevice() {
+  const ua = navigator.userAgent || '';
+  return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function isStandaloneApp() {
+  try {
+    return window.navigator.standalone === true
+      || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  } catch (e) { return false; }
+}
+
+// 回傳 'on'（推播已生效）/ 'pending'（已授權，token 設定中）/ 'ask'（可要求授權）
+//     / 'blocked'（使用者封鎖）/ 'ios'（iPhone 要先加入主畫面）/ 'off'（裝置或設定不支援）
+function pushState(order) {
+  const configured = typeof PUSH_CONFIG !== 'undefined' && PUSH_CONFIG && PUSH_CONFIG.vapidKey
+    && PUSH_CONFIG.vapidKey.indexOf('PASTE') === -1;
+  if (!configured || !('Notification' in window) || !('serviceWorker' in navigator)) {
+    return (isIOSDevice() && !isStandaloneApp()) ? 'ios' : 'off';
+  }
+  if (Notification.permission === 'denied') return 'blocked';
+  if (Notification.permission === 'granted') return (order && order.fcmToken) ? 'on' : 'pending';
+  if (isIOSDevice() && !isStandaloneApp()) return 'ios';
+  return 'ask';
+}
+
+// 確認訂單頁的取餐通知說明區塊；依實際推播狀態換文案，
+// 推播已生效時就不要再叫顧客「保持畫面開啟」——那正是這功能要解決的事。
+function renderPickupNotice(order) {
+  const box = (bg, line, ink, html) =>
+    `<div style="background:${bg};border:1.5px solid ${line};border-radius:14px;padding:12px 14px;margin-top:12px;text-align:center;color:${ink};font-weight:800;font-size:14px;">${html}</div>`;
+  const sub = (color, t) => `<span style="font-weight:500;font-size:13px;color:${color};">${t}</span>`;
+  const ok = html => box('#e6f6ee', '#54b98a', '#217a55', html);
+  const warn = html => box('#fff8e6', '#f0b64b', '#a86a12', html);
+
+  switch (pushState(order)) {
+    case 'on':
+      return ok(`🔔 取餐通知已開啟<br>${sub('#2e8c66', '可以關掉這頁去忙，餐點好了手機會跳通知提醒你 📲')}`);
+    case 'pending':
+      return ok(`🔔 取餐通知設定中…<br>${sub('#2e8c66', '完成後就可以關掉這頁，餐點好了手機會通知你')}`);
+    case 'ask':
+      return warn(`🔔 想關掉頁面也收得到通知嗎？<br>${sub('#b07a1e', '開啟後餐點完成會直接推播到你的手機')}
+        <button class="button-primary" data-action="enable-push" style="width:100%;justify-content:center;margin-top:10px;padding:10px;font-size:14px;">開啟取餐通知</button>`);
+    case 'ios':
+      return warn(`📱 iPhone 要先「加入主畫面」才收得到通知<br>${sub('#b07a1e',
+        '按 Safari 下方的分享鈕 →「加入主畫面」，之後從主畫面開啟本頁點餐，就能關掉頁面等通知。<br>現在請先保持此畫面開啟，餐點好了會自動跳出「可取餐」並響鈴 🔔')}`);
+    case 'blocked':
+      return warn(`🔕 你的瀏覽器封鎖了通知<br>${sub('#b07a1e',
+        '請在網址列旁的鎖頭圖示把「通知」改成允許；在那之前請保持此畫面開啟，餐點好了會自動跳出「可取餐」並響鈴 🔔')}`);
+    default:
+      return warn(`📱 請保持此畫面開啟、螢幕先別鎖<br>${sub('#b07a1e', '餐點好了會在這裡自動跳出「可取餐」並響鈴 🔔')}`);
+  }
+}
+
 function escapeHtml(text) {
   return String(text || '')
     .replace(/&/g, '&amp;')
@@ -1011,7 +1297,23 @@ function getSharedStyles() {
       position: relative;
       background: linear-gradient(120deg, var(--ink-soft), #6fb7d0);
       color: #fff;
-      padding-bottom: 30px;
+      padding-bottom: 34px;
+    }
+
+    /* 標題區底部的拱形波浪邊：一排連續弧線，直接用 SVG 當背景平鋪，不用額外標籤。
+       header 的 padding-bottom 已留好這塊高度，不會壓到導覽按鈕。 */
+    header::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 24px;
+      pointer-events: none;
+      background-repeat: repeat-x;
+      background-position: left bottom;
+      background-size: 48px 24px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='24' viewBox='0 0 48 24'%3E%3Cpath d='M0 24 Q24 -4 48 24' fill='none' stroke='%23ffffff' stroke-opacity='.45' stroke-width='2'/%3E%3C/svg%3E");
     }
 
     .top-row {
@@ -1266,6 +1568,112 @@ function getSharedStyles() {
       margin-top: 10px;
       padding-top: 8px;
       border-top: 1px solid var(--line);
+    }
+
+    /* ===== 公告：標題列的小按鈕 + 懸浮視窗 ===== */
+    .ann-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      margin-left: 2px;
+      border-radius: 999px;
+      background: var(--pink);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .ann-mask {
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(12, 48, 66, .55);
+    }
+
+    .ann-window {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      max-width: 440px;
+      max-height: 78vh;
+      border-radius: 22px;
+      overflow: hidden;
+      background: #fff;
+      box-shadow: 0 18px 44px rgba(12, 48, 66, .38);
+    }
+
+    .ann-window-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 15px 16px;
+      background: linear-gradient(120deg, var(--ink-soft), #6fb7d0);
+      color: #fff;
+    }
+
+    .ann-window-title {
+      font-size: 15px;
+      font-weight: 900;
+      letter-spacing: 2px;
+    }
+
+    .ann-close {
+      flex-shrink: 0;
+      width: 30px;
+      height: 30px;
+      border: none;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, .25);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 900;
+    }
+
+    .ann-window-body {
+      padding: 14px;
+      overflow-y: auto;
+    }
+
+    .ann-empty {
+      padding: 22px 0;
+      text-align: center;
+      font-size: 13px;
+      color: #9db4bf;
+    }
+
+    .ann-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      border-radius: 14px;
+      padding: 11px 13px;
+      margin-bottom: 8px;
+      box-shadow: 0 2px 6px rgba(16, 60, 80, .13);
+    }
+
+    .ann-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .ann-icon {
+      font-size: 17px;
+      line-height: 1.45;
+      flex-shrink: 0;
+    }
+
+    .ann-text {
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.6;
+      word-break: break-word;
     }
 
     @media (max-width: 768px) {
