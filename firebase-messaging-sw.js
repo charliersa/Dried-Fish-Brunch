@@ -14,15 +14,20 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 
 // 收到背景推播 → 顯示系統通知（notification-only 訊息瀏覽器多半會自動顯示，這裡再保險處理一次）
+// tag 一律用推播帶來的 data.tag：
+//   ① 跟瀏覽器自動顯示的那則同 tag → 合併成一則，不會變兩則通知
+//   ② 不同訂單 tag 不同 → 後來的單不會「靜靜蓋掉」前一單而沒有響（尖峰連續來單的元凶）
 messaging.onBackgroundMessage(payload => {
   const n = (payload && payload.notification) || {};
-  self.registration.showNotification(n.title || '🐟 餐點好囉！', {
-    body: n.body || '你的餐點製作完成，請取餐 🎉',
+  const d = (payload && payload.data) || {};
+  const isNewOrder = d.kind === 'new-order';
+  self.registration.showNotification(n.title || (isNewOrder ? '🔔 新訂單來了！' : '🐟 餐點好囉！'), {
+    body: n.body || (isNewOrder ? '有新訂單，請確認' : '你的餐點製作完成，請取餐 🎉'),
     icon: './icon-192.svg',
     badge: './icon-192.svg',
     vibrate: [200, 100, 200, 100, 300],
     requireInteraction: true,
-    tag: 'xyg-order-ready',
+    tag: d.tag || (isNewOrder ? 'xyg-new-order' : 'xyg-order-ready'),
   });
 });
 

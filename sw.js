@@ -1,6 +1,6 @@
 // 小魚乾店內系統 Service Worker
 const CACHE_PREFIX = 'xyg-order-pwa-';
-const CACHE_NAME = CACHE_PREFIX + 'v20';
+const CACHE_NAME = CACHE_PREFIX + 'v21';
 const ASSETS = [
   './',
   './index.html',
