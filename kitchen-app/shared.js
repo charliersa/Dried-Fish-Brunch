@@ -194,6 +194,7 @@ function saveOrders(orders) {
 // 期間的寫入由 Firestore 自己排隊、連上後補送，並在畫面上告知使用者不必關掉重開。
 const NET = {
   raw: null,        // 原始 firestore 實例（測試站的包裝層沒有 enableNetwork）
+  bootAt: Date.now(), // 開頁時間：頭幾秒連線還在握手，不算「連不上」
   online: true,     // 目前拿到的資料是不是來自雲端
   watchers: [],     // 所有需要自動重連的即時監聽
   sensor: false,    // 連線感測器是否已啟動
@@ -871,7 +872,10 @@ function syncClearOrders(opts) {
 
 function syncModeLabel() {
   if (SYNC.mode !== 'cloud') return '🔄 本機儲存';
-  return NET.online ? '☁️ 雲端即時同步' : '⚠️ 連線中斷，自動重連中';
+  if (NET.online) return '☁️ 雲端即時同步';
+  // 開頁寬限期：載入後頭 8 秒連線本來就還在握手（第一個快照一定來自本機快取），
+  // 這段時間顯示中性的「連線中」，不要一開頁就閃「連線中斷」嚇人
+  return (Date.now() - NET.bootAt < 8000) ? '☁️ 連線中…' : '⚠️ 連線中斷，自動重連中';
 }
 
 // ===== 營運設定同步層：菜單 + 員工/食材/設備/成本（Firestore doc config/admin，localStorage 備援）=====

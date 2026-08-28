@@ -1573,6 +1573,8 @@
     // 連不上雲端時畫面只剩這台裝置的本機備份 → 講清楚紀錄還在，別讓人以為被刪了
     function offlineNoticeHtml() {
       if (typeof SYNC === 'undefined' || SYNC.mode === 'cloud') return '';
+      // 開頁寬限期：載入頭 8 秒連線還在握手，先不要跳「連不上雲端」（會嚇人又馬上消失）
+      if (typeof NET !== 'undefined' && NET.bootAt && Date.now() - NET.bootAt < 8000) return '';
       return `<div style="background:#fdf3e3;border:1px solid #f0d59b;color:#8a5b12;border-radius:14px;padding:11px 14px;margin-bottom:12px;font-size:13px;line-height:1.7;">
         🔄 <b>目前連不上雲端</b>，以下顯示的是這台裝置的本機備份（${orders.length} 筆訂單）。<br>
         雲端上的歷史訂單與營收紀錄不會因此消失，網路恢復後重新整理就會回來。
