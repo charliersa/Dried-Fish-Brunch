@@ -475,6 +475,7 @@ function initSync(onChange, opts) {
   SYNC.lastSnapAt = Date.now();
   expireStaleBackup(); // 太久沒更新的本機備份直接作廢，避免斷線時顯示舊數字
   pendSchedule(); // 上次沒送出去的狀態變更（重新整理前卡住的），開頁就繼續補送
+  pdelSchedule(); // 上次沒刪成的訂單，開頁繼續補刪
   startPollWatchdog(); // 穩定模式：即時串流凍死時自動改用 REST 輪詢收單
   let hadData = false;
   // 交給 watchCloud 管理：斷線只會重連，不會切成本機模式（切過去就再也不會把訂單送上雲端）
@@ -609,6 +610,9 @@ function pendConfirm(id, confirmed) {
 }
 // 把記帳中的變更蓋到快照清單上；伺服器已反映的欄位順手銷帳
 function applyPendingOverlay(list) {
+  // 刪除中的訂單一律不顯示（快照/輪詢/備份哪條路來的都一樣），刪除才不會「彈回來」
+  const del = pdelLoad();
+  if (Object.keys(del).length) list = list.filter(o => !del[String(o.id)]);
   const map = pendLoad();
   const ids = Object.keys(map);
   if (!ids.length) return list;
@@ -679,6 +683,36 @@ function restValue(v) {
   if (Array.isArray(v)) return { arrayValue: { values: v.map(restValue).filter(Boolean) } };
   if (typeof v === 'object') return { mapValue: { fields: restFields(v) } };
   return null;
+}
+
+// ===== 刪除訂單「保證送達」 =====
+// 刪除指令和狀態變更一樣會卡在 SDK 佇列（卡住＝雲端沒真的刪），而畫面又等雲端
+// 回報才移除該列，輪詢合併也只加不減 —— 造成「刪了沒反應、甚至彈回來」。
+// 這裡把刪除記進 localStorage：畫面立即移除且不再合併回來；每 3 秒用 REST DELETE
+// 直連補刪（冪等，重複刪同一筆無害），伺服器回 200 才銷帳。
+const PDEL_KEY = 'xyg-pend-del';
+let _pdelTimer = null;
+function pdelLoad() { try { return JSON.parse(localStorage.getItem(PDEL_KEY) || '{}'); } catch (e) { return {}; } }
+function pdelSave(m) { try { localStorage.setItem(PDEL_KEY, JSON.stringify(m)); } catch (e) {} }
+function pdelRemember(id) { const m = pdelLoad(); m[String(id)] = Date.now(); pdelSave(m); pdelSchedule(); }
+function pdelConfirm(id) { const m = pdelLoad(); delete m[String(id)]; pdelSave(m); }
+function pdelSchedule() {
+  if (_pdelTimer) return;
+  _pdelTimer = setInterval(pdelFlush, 3000);
+}
+function pdelFlush() {
+  const m = pdelLoad();
+  const ids = Object.keys(m);
+  if (!ids.length) { clearInterval(_pdelTimer); _pdelTimer = null; return; }
+  if (typeof FIREBASE_CONFIG === 'undefined' || !FIREBASE_CONFIG || !FIREBASE_CONFIG.apiKey) return;
+  ids.forEach(id => {
+    if (Date.now() - m[id] > 86400000) { pdelConfirm(id); return; } // 超過一天的舊帳放棄
+    fetch('https://firestore.googleapis.com/v1/projects/' + FIREBASE_CONFIG.projectId
+      + '/databases/(default)/documents/orders/' + encodeURIComponent(String(id)) + '?key=' + FIREBASE_CONFIG.apiKey,
+      { method: 'DELETE' })
+      .then(res => { if (res.ok) pdelConfirm(id); })
+      .catch(() => {}); // 打不通等下一輪
+  });
 }
 
 // ===== 穩定模式：即時串流凍死時，自動改用 REST 輪詢收單 =====
@@ -839,8 +873,13 @@ function keepScreenAwake() {
 // 手動刪除單一訂單（後台歷史訂單用）：雲端刪 Firestore 文件，離線改 localStorage
 function syncDeleteOrder(id) {
   if (SYNC.mode === 'cloud' && SYNC.db) {
+    pdelRemember(id); // 記帳：畫面立即移除、REST 補刪到雲端為止
+    SYNC.lastList = (SYNC.lastList || loadOrders()).filter(o => String(o.id) !== String(id));
+    try { saveOrders(loadOrders().filter(o => String(o.id) !== String(id))); } catch (e) {}
+    if (SYNC.onChange) SYNC.onChange(SYNC.lastList);
     return SYNC.db.collection('orders').doc(String(id)).delete()
-      .catch(e => console.warn('刪除訂單失敗', e));
+      .then(() => pdelConfirm(id)) // 伺服器確認刪掉才銷帳
+      .catch(e => console.warn('刪除訂單失敗（已排入自動補刪）', e));
   }
   const remain = loadOrders().filter(o => o.id !== id);
   saveOrders(remain);
@@ -852,13 +891,19 @@ function syncDeleteOrder(id) {
 function syncClearOrders(opts) {
   opts = opts || {};
   if (SYNC.mode === 'cloud' && SYNC.db) {
+    // 手上這份清單先記帳＋立即清空畫面；雲端上手上沒有的單由下方 get+batch 處理
+    const victims = (SYNC.lastList || loadOrders()).filter(o => (opts.todayOnly ? isToday(o.createdAt) : true));
+    victims.forEach(o => pdelRemember(o.id));
+    SYNC.lastList = (SYNC.lastList || []).filter(o => (opts.todayOnly ? !isToday(o.createdAt) : false));
+    if (SYNC.onChange) SYNC.onChange(SYNC.lastList);
     const base = SYNC.db.collection('orders');
     const getP = opts.todayOnly ? base.where('createdAt', '>=', startOfToday()).get() : base.get();
     return getP.then(snap => {
       const batch = SYNC.db.batch();
       snap.docs.forEach(doc => batch.delete(doc.ref));
       return batch.commit();
-    }).catch(e => console.warn('清除訂單失敗', e));
+    }).then(() => { victims.forEach(o => pdelConfirm(o.id)); })
+      .catch(e => console.warn('清除訂單失敗（已排入自動補刪）', e));
   }
   if (opts.todayOnly) {
     const remain = loadOrders().filter(o => !isToday(o.createdAt));
