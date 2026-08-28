@@ -1568,7 +1568,14 @@
       const hasNew = list.some(o => !_knownIds.has(o.id) && o.status === 'new' && !o.rejected);
       _knownIds = ids;
       if (hasNew && soundEnabled) playNewOrderSound();
+      if (hasNew && !_jumpTimer) {
+        // 店主在後台看報表/改菜單時進了新單 → 先響鈴提示，1.5 秒後自動跳到廚房後台，避免漏單
+        // （後台的編輯都會自動儲存，跳走不會遺失資料）
+        showMessage('🔔 有新訂單！正在前往廚房後台…');
+        _jumpTimer = setTimeout(() => { location.href = 'kitchen.html'; }, 1500);
+      }
     }
+    let _jumpTimer = null; // 新單自動跳轉計時器（防重複觸發）
 
     // 連不上雲端時畫面只剩這台裝置的本機備份 → 講清楚紀錄還在，別讓人以為被刪了
     function offlineNoticeHtml() {
