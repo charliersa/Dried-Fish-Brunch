@@ -176,7 +176,7 @@
         ? `<div style="padding:18px;width:100%;max-width:1200px;">
              <div style="font-size:22px;opacity:.95;margin-bottom:10px;">🔵 準備中（製作中）</div>
              <div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;">
-               ${preparing.map(o => `<div style="background:rgba(62,155,209,.35);border:2px solid rgba(255,255,255,.6);border-radius:14px;padding:12px 22px;font-size:32px;font-weight:900;">${escapeHtml(o.no)}</div>`).join('')}
+               ${preparing.map(o => `<div style="background:rgba(62,155,209,.35);border:2px solid rgba(255,255,255,.6);border-radius:14px;padding:12px 22px;font-size:32px;font-weight:900;text-align:center;">${escapeHtml(o.no)}${pickupLabel(o) ? `<div style="font-size:16px;font-weight:800;opacity:.95;margin-top:2px;">⏰ ${escapeHtml(pickupLabel(o))}</div>` : ''}</div>`).join('')}
              </div>
            </div>`
         : '';
@@ -185,7 +185,7 @@
         <div class="display-container">
           <div class="display-header">
             <h1>🐟 小魚乾早午餐</h1>
-            <p>🔴 紅色 = 已可取餐　🔵 藍色 = 準備中</p>
+            <p>🔴 紅色 = 已可取餐　🔵 藍色 = 準備中　⏰ = 顧客指定的取餐時間</p>
           </div>
           ${!_audioReady ? `<div style="background:#e05252;color:#fff;font-size:22px;font-weight:900;padding:12px 20px;border-radius:14px;margin:0 18px 12px;cursor:pointer;">⚠️ 叫號提示音未啟用 — 請點一下畫面</div>` : ''}
           <div class="display-main">${readyHtml}</div>

@@ -50,7 +50,8 @@
 
     function renderKitchen() {
       const todayOrders = orders.filter(order => isToday(order.createdAt) && !order.rejected);
-      const active = todayOrders.filter(order => order.status !== 'done');
+      // 照「該出餐時間」排：顧客沒指定就用下單時間（＝盡快），預約單會待到時間快到才浮上來
+      const active = todayOrders.filter(order => order.status !== 'done').sort(pickupSort);
       const doneOrders = todayOrders.filter(order => order.status === 'done');
       const stats = {
         total: todayOrders.length,
@@ -79,7 +80,7 @@
                 <div style="border:2px solid #e5534b;border-radius:14px;padding:10px 12px;">
                   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
                     <span style="font-size:22px;font-weight:900;color:#e5534b;">${escapeHtml(o.no)}</span>
-                    <span style="font-size:12px;color:var(--ink-soft);">${o.type} · ${escapeHtml(o.table || '')}${o.phone ? ' · 📞' + escapeHtml(o.phone) : ''} · $${o.total}</span>
+                    <span style="font-size:12px;color:var(--ink-soft);">${o.type} · ${escapeHtml(o.table || '')}${o.phone ? ' · 📞' + escapeHtml(o.phone) : ''}${pickupLabel(o) ? ' · ⏰' + escapeHtml(pickupLabel(o)) : ''} · $${o.total}</span>
                   </div>
                   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                     <span style="font-size:13px;color:var(--ink-soft);">結帳：</span>${payBadge}
@@ -177,6 +178,7 @@
             <span>·</span>
             <span>${escapeHtml(order.table)}</span>
             ${order.phone ? `<span>·</span><span>📞 ${escapeHtml(order.phone)}</span>` : ''}
+            ${pickupChip(order)}
           </div>
           <div class="order-items">
             ${order.items.map(item => { const mi = getItem(item.id); const nm = (mi && mi.name) || item.name || '未知品項'; const note = itemPureNote(item); return `

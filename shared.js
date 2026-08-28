@@ -955,6 +955,69 @@ function getItem(itemId) {
   return CURRENT_MENU.flatMap(cat => cat.items).find(item => item.id === itemId);
 }
 
+// ===== 顧客指定取餐時間：訂單的 pickup 欄位存 'HH:MM'，空字串／沒有這個欄位＝盡快做 =====
+// 舊訂單沒有 pickup，所有讀取一律走 pickupLabel()，店家端才不會冒出 undefined。
+function pickupLabel(order) {
+  const t = order && order.pickup;
+  return (typeof t === 'string' && /^\d{1,2}:\d{2}$/.test(t.trim())) ? t.trim() : '';
+}
+
+// 現在時間的 HH:MM（給 <input type="time"> 當 min 用）
+function nowHHMM() {
+  const d = new Date();
+  return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+}
+
+// 指定取餐時間換成毫秒時間戳（以訂單成立那天為準）；沒指定回 null
+function pickupTime(order) {
+  const t = pickupLabel(order);
+  if (!t) return null;
+  const parts = t.split(':');
+  const d = new Date(order.createdAt || Date.now());
+  d.setHours(parseInt(parts[0], 10), parseInt(parts[1], 10), 0, 0);
+  return d.getTime();
+}
+
+// 顧客填的取餐時間能不能用：可以回 ''，不行回要顯示給顧客看的原因
+function pickupError(hhmm) {
+  const t = (hhmm || '').trim();
+  if (!t) return ''; // 留空＝盡快，永遠可用
+  if (!/^\d{1,2}:\d{2}$/.test(t)) return '取餐時間格式不對，請重新選一次';
+  const parts = t.split(':');
+  const mins = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+  const now = new Date();
+  if (mins < now.getHours() * 60 + now.getMinutes()) return '取餐時間不能早於現在，請重新選一次';
+  if (isCloseEnabled()) {
+    const c = getCloseTime();
+    if (/^\d{1,2}:\d{2}$/.test(c)) {
+      const cp = c.split(':');
+      if (mins > parseInt(cp[0], 10) * 60 + parseInt(cp[1], 10)) return '今日 ' + c + ' 結單，取餐時間請選在這之前';
+    }
+  }
+  return '';
+}
+
+// 店家端（廚房／收銀）訂單卡上的取餐時間標籤；顧客沒指定就回空字串（畫面維持原樣）
+// 已經過了指定時間又還沒完成 → 轉紅並標「已過」，提醒現場先做這張
+function pickupChip(order, now) {
+  const t = pickupLabel(order);
+  if (!t) return '';
+  const due = pickupTime(order);
+  const late = due != null && (now || Date.now()) > due && order.status !== 'done';
+  return '<span>·</span><span style="font-weight:900;color:' + (late ? '#e5534b' : 'var(--pink-deep)') + ';">⏰ ' + escapeHtml(t) + (late ? ' 已過' : '') + '</span>';
+}
+
+// 這張單「該出餐的時間」：顧客有指定取餐時間就用指定時間，沒指定＝盡快，就用下單時間
+function dueTime(order) {
+  const t = pickupTime(order);
+  return t != null ? t : (order.createdAt || 0);
+}
+
+// 廚房排序：照該出餐時間由早到晚。預約到 10:30 的單就會乖乖排在現場單後面，時間快到才浮上來
+function pickupSort(a, b) {
+  return dueTime(a) - dueTime(b);
+}
+
 function isToday(timestamp) {
   return new Date(timestamp).toLocaleDateString('zh-TW') === new Date().toLocaleDateString('zh-TW');
 }

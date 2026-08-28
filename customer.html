@@ -334,6 +334,7 @@
       phone: '',
       memberPhone: '',
       note: '',
+      pickup: '',          // 顧客指定的取餐時間 HH:MM（空字串＝盡快）
       cartOpen: false,
       activeItem: null,    // 商品詳情彈窗中的品項 id
       itemTemp: '冷',
@@ -596,6 +597,14 @@
             </div>
             <input id="table-input" class="input-group" placeholder="${state.diningType === '內用' ? '桌號（例：3號桌）' : '取餐名稱（必填，例：小美）'}" value="${escapeHtml(state.tableInfo)}">
             ${state.diningType === '外帶' ? `<input id="phone-input" type="tel" inputmode="numeric" maxlength="10" class="input-group" placeholder="手機（必填，例：0912345678）" value="${escapeHtml(state.phone || state.memberPhone)}" style="margin-top:8px;">` : ''}
+            <div style="margin-top:8px;background:var(--pink-bg);border-radius:12px;padding:10px 12px;">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span style="font-size:13px;font-weight:800;color:var(--pink-deep);white-space:nowrap;">⏰ 取餐時間</span>
+                <input id="pickup-input" type="time" class="input-group" style="flex:1;min-width:130px;width:auto;" value="${escapeHtml(state.pickup)}" min="${nowHHMM()}"${isCloseEnabled() ? ` max="${escapeHtml(getCloseTime())}"` : ''}>
+                <button type="button" class="pill-button" data-action="clear-pickup" style="border-color:var(--pink);color:var(--pink-deep);white-space:nowrap;">盡快</button>
+              </div>
+              <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">不指定＝盡快做好；指定時間我們會盡量在那個時間前後出餐，好了一樣會通知你。</div>
+            </div>
             <input id="note-input" class="input-group" placeholder="整單備註（例：餐具、不附吸管）" value="${escapeHtml(state.note)}" style="margin-top:8px;">
             <button class="button-submit" data-action="submit-order">🔔 送出訂單 · $${cartTotal()}</button>
           </div>
@@ -672,6 +681,7 @@
               <span style="font-weight:700;">${order.type} · ${escapeHtml(order.table)}${order.phone ? ` · 📞 ${escapeHtml(order.phone)}` : ''}</span>
               <span style="color:var(--ink-soft);font-size:13px;">${new Date(order.createdAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
             </div>
+            ${pickupLabel(order) ? `<div style="font-size:13px;font-weight:800;color:var(--pink-deep);background:var(--pink-bg);border-radius:8px;padding:5px 8px;margin-bottom:6px;">⏰ 指定取餐時間：${escapeHtml(pickupLabel(order))}</div>` : ''}
             ${itemsHtml}
             ${order.note ? `<div style="font-size:13px;color:var(--amber);margin-top:6px;background:rgba(232,154,43,.1);border-radius:8px;padding:5px 8px;">備註：${escapeHtml(order.note)}</div>` : ''}
             <div style="display:flex;align-items:center;justify-content:space-between;font-weight:900;border-top:1px solid var(--line);margin-top:8px;padding-top:8px;"><span>合計</span><span style="color:var(--pink);">$${order.total}</span></div>
@@ -724,6 +734,8 @@
       const phoneInput = document.getElementById('phone-input');
       if (tableInput) tableInput.addEventListener('input', e => state.tableInfo = e.target.value);
       if (noteInput) noteInput.addEventListener('input', e => state.note = e.target.value);
+      const pickupInput = document.getElementById('pickup-input');
+      if (pickupInput) pickupInput.addEventListener('input', e => state.pickup = e.target.value);
       if (itemNoteInput) itemNoteInput.addEventListener('input', e => state.itemNote = e.target.value);
       // 手機欄位：只允許數字、最長 10 碼，且不會被重整洗掉（值存在 state）
       const onPhoneInput = key => e => {
@@ -814,6 +826,9 @@
       } else if (action === 'close-sheet') {
         state.cartOpen = false;
         renderCustomer();
+      } else if (action === 'clear-pickup') {
+        state.pickup = ''; // 改回「盡快」（iOS 的時間欄位自己清不掉）
+        renderCustomer();
       } else if (action === 'submit-order') {
         submitOrder();
       } else if (action === 'enable-push') {
@@ -833,6 +848,7 @@
         state.phone = '';
         state.memberPhone = '';
         state.note = '';
+        state.pickup = '';
         state.cartOpen = false;
         state.activeItem = null;
         state.itemOptions = [];
@@ -927,6 +943,10 @@
         if (!state.tableInfo.trim()) { showMessage('外帶請填取餐名稱'); return; }
         if (!/^09\d{8}$/.test(phone)) { showMessage('外帶請填正確手機號碼（09 開頭共 10 碼）'); return; }
       }
+      // 取餐時間（留空＝盡快）：不能填過去的時間，也不能超過今日結單時間
+      const pickup = (state.pickup || '').trim();
+      const pickupErr = pickupError(pickup);
+      if (pickupErr) { showMessage(pickupErr); return; }
       state.submitting = true;
       // 在「送出」手勢中先要求通知權限（餐點完成才推播得到）
       try { if ('Notification' in window && Notification.permission === 'default' && typeof PUSH_CONFIG !== 'undefined' && PUSH_CONFIG.vapidKey && PUSH_CONFIG.vapidKey.indexOf('PASTE') === -1) Notification.requestPermission(); } catch (e) {}
@@ -938,6 +958,7 @@
         table: state.tableInfo.trim() || (state.diningType === '內用' ? '未填桌號' : '未填名稱'),
         phone: phone, // 外帶必填；內用若有帶會員手機也一併記錄
         note: state.note.trim(),
+        pickup: pickup, // 顧客指定的取餐時間 HH:MM（空字串＝盡快）
         items: state.cart.map(line => {
           const mi = getItem(line.id);
           return { id: line.id, name: mi ? mi.name : '', price: linePrice(line), temp: line.temp || '', note: line.note || '', qty: line.qty, extras: line.extras || [] };
