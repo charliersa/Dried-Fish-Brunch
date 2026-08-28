@@ -325,7 +325,13 @@
       const hasNew = list.some(o => !_knownIds.has(o.id) && !o.rejected && !(o.pay && o.pay.paid));
       _knownIds = ids;
       if (hasNew && soundEnabled) playNewOrderSound();
+      if (hasNew && !_jumpTimer) {
+        // 有新訂單 → 響鈴後 1.5 秒自動跳到廚房後台，避免停在收銀頁漏單
+        if (typeof showMessage === 'function') showMessage('🔔 有新訂單！正在前往廚房後台…');
+        _jumpTimer = setTimeout(() => { location.href = 'kitchen.html'; }, 1500);
+      }
     }
+    let _jumpTimer = null; // 新單自動跳轉計時器（防重複觸發）
 
     renderCashier();
     // 已授權過通知的裝置：開頁就自動更新推播 token，不必等第一次觸控（詳見 kitchen.html 同段說明）
