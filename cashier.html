@@ -249,19 +249,20 @@
       try { renderCashier(); } catch (e) {}
     }
     function _unlockAudio() {
+      if (!_alertAudio.paused) return; // 鈴聲正在播的時候不做測試，避免把鈴聲切斷
       const ctx = _getAudioCtx();
       if (ctx && ctx.state === 'suspended') {
         const r = ctx.resume();
         if (r && r.then) r.then(() => { if (ctx.state === 'running') _markAudioReady(true); }).catch(() => {});
       }
       try {
-        _alertAudio.volume = 0;
+        _alertAudio.muted = true; _alertAudio.volume = 0;
         const p = _alertAudio.play();
         if (p && p.then) p.then(() => {
-          _alertAudio.pause(); _alertAudio.currentTime = 0; _alertAudio.volume = 1;
+          _alertAudio.pause(); _alertAudio.currentTime = 0; _alertAudio.volume = 1; _alertAudio.muted = false;
           _markAudioReady(true); // 真的播得出來才算解鎖
-        }).catch(() => { _alertAudio.volume = 1; });
-      } catch (e) { _alertAudio.volume = 1; }
+        }).catch(() => { _alertAudio.volume = 1; _alertAudio.muted = false; });
+      } catch (e) { _alertAudio.volume = 1; _alertAudio.muted = false; }
       if (!_bpDone) { _bpDone = true; registerBackendPush(); } // 首次互動時註冊後端推播（關網頁也收得到新單）
     }
     document.addEventListener('touchend', _unlockAudio, { passive: true });
@@ -310,7 +311,7 @@
       try {
         if (window.ALERT_SOUND_URI) {
           _alertAudio.currentTime = 0;
-          _alertAudio.volume = 1;
+          _alertAudio.volume = 1; _alertAudio.muted = false;
           const p = _alertAudio.play();
           if (p) {
             if (p.then) p.then(() => _markAudioReady(true));

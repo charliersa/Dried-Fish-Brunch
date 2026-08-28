@@ -793,9 +793,10 @@
     const _alertAudio = new Audio(window.ALERT_SOUND_URI || '');
     _alertAudio.preload = 'auto';
     function _unlockAudio() {
+      if (!_alertAudio.paused) return; // 鈴聲正在播的時候不做測試，避免把鈴聲切斷
       const ctx = _getAudioCtx();
       if (ctx && ctx.state === 'suspended') ctx.resume();
-      try { _alertAudio.volume = 0; const p = _alertAudio.play(); if (p && p.then) p.then(() => { _alertAudio.pause(); _alertAudio.currentTime = 0; _alertAudio.volume = 1; }).catch(() => { _alertAudio.volume = 1; }); } catch (e) { _alertAudio.volume = 1; }
+      try { _alertAudio.muted = true; _alertAudio.volume = 0; const p = _alertAudio.play(); if (p && p.then) p.then(() => { _alertAudio.pause(); _alertAudio.currentTime = 0; _alertAudio.volume = 1; _alertAudio.muted = false; }).catch(() => { _alertAudio.volume = 1; _alertAudio.muted = false; }); } catch (e) { _alertAudio.volume = 1; _alertAudio.muted = false; }
     }
     document.addEventListener('touchend', _unlockAudio, { passive: true });
     document.addEventListener('click', _unlockAudio, { passive: true });
@@ -809,7 +810,7 @@
       let ok = false;
       try {
         if (window.ALERT_SOUND_URI) {
-          _alertAudio.currentTime = 0; _alertAudio.volume = 1;
+          _alertAudio.currentTime = 0; _alertAudio.volume = 1; _alertAudio.muted = false;
           const p = _alertAudio.play();
           if (p && p.catch) p.catch(() => {});
           ok = true;
@@ -922,7 +923,7 @@
       const hasNew = list.some(o => !_bellKnownIds.has(o.id) && o.status === 'new' && !o.rejected);
       _bellKnownIds = ids;
       if (hasNew) {
-        try { _alertAudio.currentTime = 0; _alertAudio.volume = 1; const p = _alertAudio.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+        try { _alertAudio.currentTime = 0; _alertAudio.volume = 1; _alertAudio.muted = false; const p = _alertAudio.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
       }
     }
 

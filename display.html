@@ -133,20 +133,22 @@
     const display = document.getElementById('display');
     let orders = loadOrders();
     let lastCompleted = null;
+    const _bootAt = Date.now(); // 開頁時間：頭幾秒不補響既有的可取餐號碼
 
     // 叫號提示音（全系統唯一音源 鈴聲.mp3）；瀏覽器要求先有一次互動才能出聲
     const _alertAudio = new Audio(window.ALERT_SOUND_URI || '');
     _alertAudio.preload = 'auto';
     let _audioReady = false;
     function _unlockAudio() {
+      if (!_alertAudio.paused) return; // 鈴聲正在播的時候不做測試，避免把鈴聲切斷
       try {
-        _alertAudio.volume = 0;
+        _alertAudio.muted = true; _alertAudio.volume = 0;
         const p = _alertAudio.play();
         if (p && p.then) p.then(() => {
-          _alertAudio.pause(); _alertAudio.currentTime = 0; _alertAudio.volume = 1;
+          _alertAudio.pause(); _alertAudio.currentTime = 0; _alertAudio.volume = 1; _alertAudio.muted = false;
           if (!_audioReady) { _audioReady = true; renderDisplay(); }
-        }).catch(() => { _alertAudio.volume = 1; });
-      } catch (e) { _alertAudio.volume = 1; }
+        }).catch(() => { _alertAudio.volume = 1; _alertAudio.muted = false; });
+      } catch (e) { _alertAudio.volume = 1; _alertAudio.muted = false; }
     }
     document.addEventListener('touchend', _unlockAudio, { passive: true });
     document.addEventListener('click', _unlockAudio, { passive: true });
@@ -162,10 +164,12 @@
       const preparing = today.filter(o => !o.notified && !o.picked).sort((a, b) => a.createdAt - b.createdAt); // 藍：準備中（尚未通知取餐）
 
       // 有新號碼進入「可取餐」時嗶一聲
+      // 開頁 5 秒內不響：重新整理後看到「本來就可取餐」的舊號碼不需要再響一次
       const topId = ready.length ? ready[0].id : null;
-      if (topId && lastCompleted !== topId && typeof Audio !== 'undefined') {
+      if (topId && lastCompleted !== topId && Date.now() - _bootAt > 5000 && typeof Audio !== 'undefined') {
         try {
           _alertAudio.currentTime = 0;
+          _alertAudio.muted = false;
           _alertAudio.play().catch(() => {});
         } catch (e) {}
       }
@@ -207,7 +211,7 @@
       const hasNew = list.some(o => !_knownIds.has(o.id) && o.status === 'new' && !o.rejected);
       _knownIds = ids;
       if (hasNew) {
-        try { _alertAudio.currentTime = 0; _alertAudio.volume = 1; const p = _alertAudio.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+        try { _alertAudio.currentTime = 0; _alertAudio.volume = 1; _alertAudio.muted = false; const p = _alertAudio.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
       }
     }
 
