@@ -694,7 +694,7 @@ function startPollWatchdog() {
     if (SYNC.mode !== 'cloud') return;
     if (Date.now() - (SYNC.lastSnapAt || 0) < 15000) return; // 串流還活著
     restPollOrders();
-  }, 6000);
+  }, 3000); // 響鈴要快：串流沒消息時每 3 秒問一次有沒有新單（沒新單時一次只算 1 個讀取，額度撐得住）
 }
 async function restPollOrders() {
   if (SYNC.polling) return;
