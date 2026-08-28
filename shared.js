@@ -922,6 +922,35 @@ function saveEnt(ent) {
   return saveConfig(Object.assign({}, CONFIG.data || defaultConfig(), { ent }));
 }
 
+// ===== 品項小圖示 =====
+// 菜單是從雲端讀的（後台隨時可改、可新增），所以不在資料裡多存 icon 欄位，
+// 改成顯示時依品名關鍵字自動判斷 —— 後台新增品項不必再挑一次圖示。
+// 比對順序由主餐到飲料：套餐名稱像「蔬菜蛋+雞塊3個+紅茶」時要取主餐（蔬菜），
+// 不能被結尾的附餐飲料搶走。
+const ITEM_ICONS = [
+  ['酪梨', '🥑'], ['蔬菜', '🥬'], ['起司', '🧀'], ['玉米', '🌽'],
+  ['草莓', '🍓'], ['蔥花', '🌿'],
+  ['豬排', '🥓'], ['豬肉', '🥓'], ['鮪魚', '🐟'], ['雞腿', '🍗'], ['麥香雞', '🍗'],
+  ['泡菜', '🌶️'], ['香菇', '🍄'], ['蘿蔔糕', '🍥'],
+  ['薯條', '🍟'], ['雞塊', '🍗'],
+  ['荷包蛋', '🍳'], ['水煮蛋', '🥚'],
+  ['三明治', '🥪'], ['抓餅', '🫓'], ['蛋餅', '🥞'], ['吐司', '🍞'],
+  ['蛋', '🥚'],
+  ['鮮奶茶', '🧋'], ['奶茶', '🧋'], ['紅茶', '🍵'], ['豆漿', '🥛'], ['咖啡', '☕'],
+];
+
+// 品名開頭本來就有圖案時（例如「👍香菇蘿蔔糕 ❤️價格優惠中」）就不再加，免得兩個圖案並排
+const LEADING_EMOJI = /^[🌀-🫿☀-➿⬀-⯿]/u;
+
+function itemIcon(category, item) {
+  const name = (item && item.name) || '';
+  if (!name || LEADING_EMOJI.test(name)) return '';
+  for (let i = 0; i < ITEM_ICONS.length; i++) {
+    if (name.indexOf(ITEM_ICONS[i][0]) !== -1) return ITEM_ICONS[i][1];
+  }
+  return (category && category.icon) || ''; // 關鍵字都對不上 → 沿用分類圖示，不會開天窗
+}
+
 function getItem(itemId) {
   return CURRENT_MENU.flatMap(cat => cat.items).find(item => item.id === itemId);
 }
