@@ -730,7 +730,8 @@
       const takeout = today.length - dineIn;
       const cash = today.filter(o => o.pay && o.pay.paid && o.pay.method === 'cash').reduce((s, o) => s + o.total, 0);
       const mobile = today.filter(o => o.pay && o.pay.paid && o.pay.method === 'mobile').reduce((s, o) => s + o.total, 0);
-      const unpaid = today.filter(o => !isPaid(o)).reduce((s, o) => s + (o.total || 0), 0);
+      const unpaidOrders = today.filter(o => !isPaid(o));
+      const unpaid = unpaidOrders.reduce((s, o) => s + (o.total || 0), 0);
 
       const catMap = {};
       paid.forEach(o => (o.items || []).forEach(it => {
@@ -766,6 +767,20 @@
           ${renderStat('已完成', doneC, 'var(--blue)')}
           ${renderStat('內用 / 外帶', dineIn + ' / ' + takeout, 'var(--pink)')}
         </div>
+        ${unpaidOrders.length ? `
+        <div class="admin-card">
+          <h3>⏳ 待結帳明細（${unpaidOrders.length} 筆 · 共 $${unpaid}）</h3>
+          ${unpaidOrders.map(o => `
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px dashed var(--line);font-size:13px;">
+              <div style="min-width:0;">
+                <b style="color:var(--pink);font-size:15px;">${escapeHtml(String(o.no))}</b>
+                <span style="color:var(--ink-soft);">　${o.type || ''} · ${escapeHtml(o.table || '')}${o.phone ? ' · 📞' + escapeHtml(o.phone) : ''}</span>
+                <div style="margin-top:2px;">${(o.items || []).map(it => escapeHtml(nameOf(it)) + ' ×' + it.qty).join('、')}</div>
+                ${o.note ? `<div style="color:var(--amber);">📝 ${escapeHtml(o.note)}</div>` : ''}
+              </div>
+              <b style="white-space:nowrap;font-size:15px;">$${o.total || 0}</b>
+            </div>`).join('')}
+        </div>` : ''}
         <div class="admin-card"><h3>近 7 日營收</h3>${barChart(dayRows, v => '$' + v)}</div>
         <div class="admin-cols">
           <div class="admin-card"><h3>付款方式分布</h3>${rankList(payRows, v => '$' + v, '今天還沒有銷售紀錄')}</div>
