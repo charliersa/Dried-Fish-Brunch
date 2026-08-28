@@ -330,10 +330,6 @@
     }
     document.addEventListener('touchend', _unlockAudio, { passive: true });
     document.addEventListener('click', _unlockAudio, { passive: true });
-    // 已授權過通知的裝置：開頁就自動更新推播 token，不必等第一次觸控。
-    // 以前要等有人碰螢幕才更新，早上都沒人碰的話，雲端存的還是舊 token，關店通知可能推不到
-    //（8/18 漏單那天，雲端就沒有任何一台當天更新過的 token）。
-    if ('Notification' in window && Notification.permission === 'granted') { _bpDone = true; registerBackendPush(); }
     // 接單裝置螢幕不自動鎖定：鎖屏後 iOS 會無聲切斷連線，新單不響也不顯示
     if (typeof keepScreenAwake === 'function') keepScreenAwake();
     // 註冊本裝置為「後端推播接收者」：授權通知→取得 token→存進 backendTokens
@@ -404,6 +400,15 @@
     }
 
     renderKitchen();
+    // 已授權過通知的裝置：開頁就自動更新推播 token，不必等第一次觸控。
+    // 以前要等有人碰螢幕才更新，早上都沒人碰的話，雲端存的還是舊 token，關店通知可能推不到
+    //（8/18 漏單那天，雲端就沒有任何一台當天更新過的 token）。
+    // ⚠️ 這行必須放在所有頂層 let 宣告之後。權限已是 granted 時 registerBackendPush()
+    // 不會停在任何 await，會同步走到 render*() —— 而 render*() 讀 soundEnabled，
+    // 放在檔案中段就會踩到 let 的暫時性死區（ReferenceError），錯誤又被自己的 catch
+    // 吞成一行 console.warn。結果這個「開頁自動更新 token」的防漏單機制從未生效過。
+    if ('Notification' in window && Notification.permission === 'granted') { _bpDone = true; registerBackendPush(); }
+
     initSync(list => {
       orders = list;
       checkNewOrders(list); // 有新訂單就響鈴提醒

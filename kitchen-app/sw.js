@@ -1,6 +1,6 @@
 // 內場製作台 App（獨立版）Service Worker
 const CACHE_PREFIX = 'xyg-kitchen-pwa-';
-const CACHE_NAME = CACHE_PREFIX + 'v9';
+const CACHE_NAME = CACHE_PREFIX + 'v10';
 const ASSETS = [
   './',
   './index.html',
