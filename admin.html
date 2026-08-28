@@ -1524,6 +1524,9 @@
         let bid;
         try { bid = localStorage.getItem('xyg-backend-id'); if (!bid) { bid = 'bk' + Date.now() + Math.floor(Math.random() * 1000); localStorage.setItem('xyg-backend-id', bid); } } catch (e) { bid = token.slice(-24); }
         await firebase.firestore().collection('backendTokens').doc(bid).set({ token, updatedAt: Date.now() });
+        // 前景推播＝「有新單」的即時鬧鐘：推播走 Apple 通道不經店內資料連線，
+        // 收到的瞬間立刻直連同步一次，資料連線再慢也拖不住響鈴
+        try { firebase.messaging().onMessage(function () { try { restPollOrders(); } catch (e) {} }); } catch (e) {}
         _pushState = 'granted'; paintSound();
         if (before !== 'granted' || interactive) alert('✅ 關店通知已開啟！\n顧客下單時，即使這台網頁關著也會跳通知＋響。');
       } catch (e) { if (interactive) alert('設定失敗：' + ((e && e.message) || e)); console.warn('後端推播註冊略過', e); }
