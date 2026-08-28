@@ -316,6 +316,11 @@
     }
     document.addEventListener('touchend', _unlockAudio, { passive: true });
     document.addEventListener('click', _unlockAudio, { passive: true });
+    // 盡力自動啟用：載入與回到前景時先試著解鎖（環境允許就直接生效、紅色提示不會出現；
+    // 被瀏覽器擋下也無妨，碰螢幕任一處會立刻解鎖）
+    setTimeout(_unlockAudio, 400);
+    window.addEventListener('pageshow', _unlockAudio);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) _unlockAudio(); });
     // 接單裝置螢幕不自動鎖定：鎖屏後 iOS 會無聲切斷連線，新單不響也不顯示
     if (typeof keepScreenAwake === 'function') keepScreenAwake();
     // 註冊本裝置為「後端推播接收者」：授權通知→取得 token→存進 backendTokens

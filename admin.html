@@ -1495,6 +1495,11 @@
     }
     document.addEventListener('touchend', _unlockAudio, { passive: true });
     document.addEventListener('click', _unlockAudio, { passive: true });
+    // 盡力自動啟用：載入與回到前景時先試著解鎖（環境允許就直接生效、紅色提示不會出現；
+    // 被瀏覽器擋下也無妨，碰螢幕任一處會立刻解鎖）
+    setTimeout(_unlockAudio, 400);
+    window.addEventListener('pageshow', _unlockAudio);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) _unlockAudio(); });
 
     // ---------- 關店通知（FCM 後端推播；網頁關著也收得到新單）----------
     // 顧客送出訂單 → 顧客端呼叫 push-server 的 notify-backend → 推播給 backendTokens 裡所有裝置

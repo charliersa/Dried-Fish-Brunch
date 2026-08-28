@@ -799,6 +799,11 @@
     }
     document.addEventListener('touchend', _unlockAudio, { passive: true });
     document.addEventListener('click', _unlockAudio, { passive: true });
+    // 盡力自動啟用：載入與回到前景時先試著解鎖（環境允許就直接生效、紅色提示不會出現；
+    // 被瀏覽器擋下也無妨，碰螢幕任一處會立刻解鎖）
+    setTimeout(_unlockAudio, 400);
+    window.addEventListener('pageshow', _unlockAudio);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) _unlockAudio(); });
     // 可取餐時顧客手機響：優先播音檔（相容性最高，平板/舊手機也能響），失敗才用 Web Audio
     function playReadySound() {
       let ok = false;
