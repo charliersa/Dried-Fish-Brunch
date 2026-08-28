@@ -469,7 +469,10 @@ function initSync(onChange, opts) {
   if (!db) { startLocalSync(); return; }
   SYNC.db = db;
   SYNC.mode = 'cloud';
+  SYNC.todayOnly = !!opts.today;
+  SYNC.lastSnapAt = Date.now();
   pendSchedule(); // 上次沒送出去的狀態變更（重新整理前卡住的），開頁就繼續補送
+  startPollWatchdog(); // 穩定模式：即時串流凍死時自動改用 REST 輪詢收單
   let hadData = false;
   // 交給 watchCloud 管理：斷線只會重連，不會切成本機模式（切過去就再也不會把訂單送上雲端）
   watchCloud('訂單', (ok, fail) => {
@@ -484,6 +487,9 @@ function initSync(onChange, opts) {
         hadData = true;
         // 先套上「保證送達佇列」裡還沒確認的狀態變更，畫面才不會倒退回舊狀態
         const list = applyPendingOverlay(snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data())));
+        SYNC.lastSnapAt = Date.now(); // 穩定模式：證明串流還活著，輪詢就不出手
+        SYNC.lastList = list;
+        list.forEach(o => { const u = o.updatedAt || o.createdAt || 0; if (u > (SYNC.pollSeen || 0)) SYNC.pollSeen = u; });
         backupOrders(list, !!opts.today);
         if (SYNC.onChange) SYNC.onChange(list);
       },
@@ -649,6 +655,81 @@ function restValue(v) {
   if (Array.isArray(v)) return { arrayValue: { values: v.map(restValue).filter(Boolean) } };
   if (typeof v === 'object') return { mapValue: { fields: restFields(v) } };
   return null;
+}
+
+// ===== 穩定模式：即時串流凍死時，自動改用 REST 輪詢收單 =====
+// 老平板的 Safari 常把即時串流連線凍死，症狀就是「有時收得到、有時收不到」。
+// 每 10 秒檢查一次：超過 25 秒沒收到任何串流快照，就改用 REST 直連通道問
+// 「上次之後有沒有訂單新增／變更」（一次一問一答、每次都是全新連線，凍不死），
+// 有變化就合併進畫面照常響鈴；串流活回來後輪詢自動退場，完全不用人管。
+function startPollWatchdog() {
+  if (SYNC.pollWatch) return;
+  SYNC.pollWatch = setInterval(() => {
+    if (SYNC.mode !== 'cloud') return;
+    if (Date.now() - (SYNC.lastSnapAt || 0) < 25000) return; // 串流還活著
+    restPollOrders();
+  }, 10000);
+}
+async function restPollOrders() {
+  if (SYNC.polling) return;
+  if (typeof FIREBASE_CONFIG === 'undefined' || !FIREBASE_CONFIG || !FIREBASE_CONFIG.apiKey) return;
+  SYNC.polling = true;
+  try {
+    // 只問「上次看過之後有變更」的單；時鐘可能有誤差，往回多抓 60 秒（重複讀到只是原樣覆蓋）
+    const since = Math.max((SYNC.pollSeen || 0) - 60000, startOfToday() - 60000);
+    const body = {
+      structuredQuery: {
+        from: [{ collectionId: 'orders' }],
+        where: { fieldFilter: { field: { fieldPath: 'updatedAt' }, op: 'GREATER_THAN', value: { integerValue: String(since) } } },
+        orderBy: [{ field: { fieldPath: 'updatedAt' }, direction: 'ASCENDING' }],
+        limit: 300,
+      },
+    };
+    const res = await fetch('https://firestore.googleapis.com/v1/projects/' + FIREBASE_CONFIG.projectId
+      + '/databases/(default)/documents:runQuery?key=' + FIREBASE_CONFIG.apiKey,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!res.ok) return;
+    const rows = await res.json();
+    const docs = (rows || []).filter(r => r && r.document).map(r => restToOrder(r.document));
+    docs.forEach(d => { const u = d.updatedAt || d.createdAt || 0; if (u > (SYNC.pollSeen || 0)) SYNC.pollSeen = u; });
+    if (!docs.length) return;
+    // 以訂單 id 合併：輪詢到的較新資料蓋過手上這份
+    const map = {};
+    (SYNC.lastList || loadOrders()).forEach(o => { map[String(o.id)] = o; });
+    docs.forEach(d => { map[String(d.id)] = Object.assign(map[String(d.id)] || {}, d); });
+    let list = Object.keys(map).map(k => map[k]);
+    if (SYNC.todayOnly) list = list.filter(o => isToday(o.createdAt));
+    list.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    list = applyPendingOverlay(list);
+    SYNC.lastList = list;
+    backupOrders(list, !!SYNC.todayOnly);
+    if (SYNC.onChange) SYNC.onChange(list);
+  } catch (e) {} finally {
+    SYNC.polling = false;
+  }
+}
+// Firestore REST 格式 → 一般物件（restValue 的反向）
+function restParseValue(v) {
+  if (!v) return null;
+  if ('nullValue' in v) return null;
+  if ('booleanValue' in v) return v.booleanValue;
+  if ('integerValue' in v) return Number(v.integerValue);
+  if ('doubleValue' in v) return v.doubleValue;
+  if ('stringValue' in v) return v.stringValue;
+  if (v.timestampValue) { const t = new Date(v.timestampValue).getTime(); return isNaN(t) ? null : t; } // sentAt 伺服器時間戳
+  if (v.arrayValue) return (v.arrayValue.values || []).map(restParseValue);
+  if (v.mapValue) return restParseFields(v.mapValue.fields || {});
+  return null;
+}
+function restParseFields(fields) {
+  const out = {};
+  Object.keys(fields || {}).forEach(k => { out[k] = restParseValue(fields[k]); });
+  return out;
+}
+function restToOrder(doc) {
+  const o = restParseFields(doc.fields);
+  o.id = String(doc.name).split('/').pop();
+  return o;
 }
 
 // ===== 訂單送達確認（顧客端「店家已接收」用）=====
