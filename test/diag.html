@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>連線診斷 · 小魚乾</title>
+<style>
+  :root { --ink:#2c3e50; --ok:#217a55; --bad:#b3322b; --warn:#a86a12; --line:#d9e2ec; }
+  * { box-sizing:border-box; -webkit-text-size-adjust:100%; }
+  body { margin:0; padding:16px 14px 60px; font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif;
+         color:var(--ink); background:#f4f8fb; font-size:16px; line-height:1.6; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  h2 { font-size:18px; margin:24px 0 8px; }
+  .sub { color:#6b7c8d; font-size:14px; margin:0 0 16px; }
+  button { width:100%; padding:14px; margin:8px 0; border:0; border-radius:12px; background:#ec6398;
+           color:#fff; font-size:17px; font-weight:800; cursor:pointer; }
+  button.ghost { background:#fff; color:var(--ink); border:1.5px solid var(--line); }
+  button:disabled { opacity:.5; }
+  .row { background:#fff; border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin:6px 0;
+         font-size:14px; word-break:break-all; }
+  .row b { display:block; font-size:15px; margin-bottom:2px; }
+  .ok b { color:var(--ok); } .bad b { color:var(--bad); } .warn b { color:var(--warn); }
+  .ms { float:right; color:#8b9bab; font-weight:400; font-size:13px; }
+  .note { background:#fff8e6; border:1.5px solid #f0b64b; border-radius:12px; padding:12px; font-size:14px; margin:12px 0; }
+</style>
+</head>
+<body>
+  <h1>🩺 連線診斷</h1>
+  <p class="sub">只做檢查，<b>不會產生任何真實訂單</b>。測試寫入的資料日期設在 2020 年，不會出現在廚房／收銀／叫號畫面，而且測完就自動刪掉。</p>
+
+  <button id="run">① 開始診斷</button>
+  <div id="log"></div>
+
+  <h2>② 凍結測試（最重要）</h2>
+  <div class="note">這一項在模擬你們的實際操作：<b>按下送出後馬上切走去看廚房</b>。<br>
+    按下方按鈕後，請<b>立刻切到別的分頁或按 Home 鍵</b>，等 5 秒再回到這一頁。<br><br>
+    <b>A</b> 走的是正式站現在的通道，<b>B</b> 走的是修好後的通道。<br>
+    如果 <b>A 沒送達、B 有送達</b>，就證明這個修法能解決你們的掉單。</div>
+  <button id="freeze" class="ghost">A · 現在的行為（按完馬上切走）</button>
+  <button id="fixed" class="ghost">B · 修好後的行為（按完馬上切走）</button>
+  <button id="stay" class="ghost">C · 對照組：按完停在這頁別動</button>
+  <div id="flog"></div>
+
+  <button id="copy" class="ghost">📋 複製全部結果</button>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script>
+(function () {
+  'use strict';
+  var logBox = document.getElementById('log');
+  var freezeBox = document.getElementById('flog');
+  var lines = [];
+
+  // 測試文件一律用 2020 年的日期：廚房的「今日」查詢與 REST 輪詢都抓不到，不會干擾營業
+  var OLD_TS = 1600000000000;
+  var REST = 'https://firestore.googleapis.com/v1/projects/' + FIREBASE_CONFIG.projectId
+           + '/databases/(default)/documents/orders';
+
+  function say(box, state, title, detail, ms) {
+    var div = document.createElement('div');
+    div.className = 'row ' + state;
+    var t = ({ ok: '✅ ', bad: '❌ ', warn: '⚠️ ' }[state] || '· ') + title;
+    div.innerHTML = '<b>' + t + (ms != null ? '<span class="ms">' + ms + ' ms</span>' : '') + '</b>'
+                  + String(detail == null ? '' : detail).replace(/</g, '&lt;');
+    box.appendChild(div);
+    lines.push(t + (ms != null ? ' (' + ms + 'ms)' : '') + ' — ' + detail);
+    return div;
+  }
+
+  // 每個檢查都要有逾時：iOS 上最常見的症狀不是「失敗」，是「永遠不回來」
+  function withTimeout(promise, ms, label) {
+    var t0 = Date.now();
+    return Promise.race([
+      promise.then(function (v) { return { ok: true, value: v, ms: Date.now() - t0 }; },
+                   function (e) { return { ok: false, error: e, ms: Date.now() - t0 }; }),
+      new Promise(function (r) { setTimeout(function () { r({ ok: false, timeout: true, ms: ms, error: new Error(label + ' 逾時') }); }, ms); })
+    ]);
+  }
+
+  function errText(e) {
+    if (!e) return '(沒有錯誤訊息)';
+    return (e.code ? '[' + e.code + '] ' : '') + (e.message || String(e));
+  }
+
+  function probeDoc(tag) {
+    return {
+      id: 'DIAG-' + tag + '-' + Date.now(),
+      deviceId: 'DIAG',
+      no: 'ZZ00',
+      type: '內用',
+      table: '診斷用（會自動刪除）',
+      phone: '',
+      note: 'diag.html ' + tag,
+      pickup: '',
+      items: [],
+      total: 0,
+      status: 'done',
+      pay: { method: null, paid: false },
+      createdAt: OLD_TS,
+      updatedAt: OLD_TS
+    };
+  }
+
+  function restFields(o) {
+    var f = {};
+    Object.keys(o).forEach(function (k) {
+      var v = o[k];
+      if (v === null) f[k] = { nullValue: null };
+      else if (typeof v === 'string') f[k] = { stringValue: v };
+      else if (typeof v === 'number') f[k] = { integerValue: String(v) };
+      else if (typeof v === 'boolean') f[k] = { booleanValue: v };
+      else if (Array.isArray(v)) f[k] = { arrayValue: {} };
+      else f[k] = { mapValue: { fields: restFields(v) } };
+    });
+    return f;
+  }
+
+  function cleanup(id) {
+    fetch(REST + '/' + id + '?key=' + FIREBASE_CONFIG.apiKey, { method: 'DELETE' }).catch(function () {});
+  }
+
+  // ---------- ① 整體診斷 ----------
+  document.getElementById('run').addEventListener('click', function () {
+    this.disabled = true;
+    logBox.innerHTML = '';
+    lines = [];
+    run().then(function () { say(logBox, '', '診斷結束', '請按最下方「複製全部結果」回傳'); });
+  });
+
+  async function run() {
+    // 環境
+    var ua = navigator.userAgent;
+    var standalone = (window.navigator.standalone === true)
+      || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+    say(logBox, '', '瀏覽器', ua);
+    say(logBox, '', '環境', '網址=' + location.href + ' ／ 加到主畫面=' + standalone
+      + ' ／ navigator.onLine=' + navigator.onLine + ' ／ 本機時間=' + new Date().toString());
+
+    var hasBeacon = !!(navigator.sendBeacon);
+    var hasKeepalive = (function () { try { return 'keepalive' in new Request(location.href); } catch (e) { return false; } })();
+    say(logBox, hasBeacon || hasKeepalive ? 'ok' : 'bad', '離開頁面時的搶送能力',
+      'sendBeacon=' + hasBeacon + ' ／ fetch keepalive=' + hasKeepalive
+      + '（修法就是靠這個，在分頁被切走的瞬間把訂單送出去）');
+
+    // localStorage：deviceId 每次都變的元凶就看這裡
+    try {
+      localStorage.setItem('diag-probe', 'v1');
+      var back = localStorage.getItem('diag-probe');
+      localStorage.removeItem('diag-probe');
+      var devId = localStorage.getItem('xyg-device-id');
+      if (back === 'v1') say(logBox, 'ok', 'localStorage 可用', '目前記住的裝置碼 xyg-device-id = ' + (devId || '(沒有！每次開頁都會重新產生)'));
+      else say(logBox, 'bad', 'localStorage 讀寫不一致', '寫入後讀回 = ' + back);
+    } catch (e) {
+      say(logBox, 'bad', 'localStorage 不能用', errText(e) + '（私密瀏覽或「阻擋所有 Cookie」會這樣）');
+    }
+
+    // IndexedDB：Firestore 的離線佇列靠它，iOS 上可能不是失敗而是永遠卡住
+    var idb = await withTimeout(new Promise(function (res, rej) {
+      var req = indexedDB.open('diag-probe-db', 1);
+      req.onsuccess = function () { try { req.result.close(); } catch (e) {} res('opened'); };
+      req.onerror = function () { rej(req.error || new Error('open error')); };
+      req.onblocked = function () { rej(new Error('blocked')); };
+    }), 5000, 'IndexedDB');
+    if (idb.ok) say(logBox, 'ok', 'IndexedDB 可用', '開啟成功', idb.ms);
+    else say(logBox, 'bad', 'IndexedDB 不能用', errText(idb.error) + (idb.timeout ? '（卡住不回應——Firestore 的離線佇列會一起卡死）' : ''), idb.ms);
+
+    // Firebase SDK
+    if (typeof firebase === 'undefined') {
+      say(logBox, 'bad', 'Firebase SDK 沒有載入', 'gstatic 被擋或網路失敗 → 整站會靜默退成單機模式，訂單只留在這台裝置');
+      return;
+    }
+    say(logBox, 'ok', 'Firebase SDK 已載入', '版本 ' + firebase.SDK_VERSION);
+
+    // 主 app：完全比照正式站（強制長輪詢 + 離線持久化）
+    var appLP = firebase.apps.length ? firebase.app() : firebase.initializeApp(FIREBASE_CONFIG);
+    var dbLP = firebase.firestore(appLP);
+    try {
+      dbLP.settings({ experimentalForceLongPolling: true, merge: true });
+      say(logBox, 'ok', '強制長輪詢已套用', '這是正式站目前的設定（08/28 20:02 上線）');
+    } catch (e) { say(logBox, 'warn', '長輪詢設定略過', errText(e)); }
+
+    var persist = await withTimeout(dbLP.enablePersistence(), 6000, 'enablePersistence');
+    if (persist.ok) say(logBox, 'ok', '離線持久化已啟用', 'IndexedDB 佇列可用', persist.ms);
+    else say(logBox, 'warn', '離線持久化沒啟用', errText(persist.error) + '（寫入只留在記憶體，分頁一被系統凍結就消失）', persist.ms);
+
+    // 讀取（SDK）
+    var read = await withTimeout(dbLP.collection('config').doc('admin').get(), 12000, 'SDK 讀取');
+    if (read.ok) say(logBox, 'ok', 'SDK 讀取成功', '來源=' + (read.value.metadata.fromCache ? '本機快取' : '雲端'), read.ms);
+    else say(logBox, 'bad', 'SDK 讀取失敗', errText(read.error), read.ms);
+
+    // 寫入 A：長輪詢（正式站設定）
+    var a = probeDoc('lp');
+    var wa = await withTimeout(dbLP.collection('orders').doc(a.id).set(a), 15000, 'SDK 寫入（長輪詢）');
+    if (wa.ok) say(logBox, 'ok', 'SDK 寫入成功（強制長輪詢）', '＝正式站現在的設定，這台裝置送得出訂單', wa.ms);
+    else say(logBox, 'bad', 'SDK 寫入失敗（強制長輪詢）', errText(wa.error)
+      + (wa.timeout ? ' ← 沒有錯誤、就是永遠不回來，訂單就是這樣消失的' : ''), wa.ms);
+    cleanup(a.id);
+
+    // 寫入 B：SDK 預設傳輸（自動偵測），拿來跟 A 對照
+    var appAuto = firebase.apps.filter(function (x) { return x.name === 'diagAuto'; })[0]
+      || firebase.initializeApp(FIREBASE_CONFIG, 'diagAuto');
+    var dbAuto = firebase.firestore(appAuto);
+    var b = probeDoc('auto');
+    var wb = await withTimeout(dbAuto.collection('orders').doc(b.id).set(b), 15000, 'SDK 寫入（自動偵測）');
+    if (wb.ok) say(logBox, 'ok', 'SDK 寫入成功（SDK 預設傳輸）', '若 A 失敗而這項成功，就是強制長輪詢害的', wb.ms);
+    else say(logBox, 'bad', 'SDK 寫入失敗（SDK 預設傳輸）', errText(wb.error) + (wb.timeout ? ' ← 逾時' : ''), wb.ms);
+    cleanup(b.id);
+
+    // 寫入 C：純 REST，不經過 SDK 的佇列
+    var c = probeDoc('rest');
+    var t0 = Date.now();
+    try {
+      var res = await fetch(REST + '?documentId=' + c.id + '&key=' + FIREBASE_CONFIG.apiKey, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: restFields(c) })
+      });
+      if (res.ok) say(logBox, 'ok', 'REST 直寫成功', 'HTTP ' + res.status + '——補送通道可用，這就是修法要走的路', Date.now() - t0);
+      else say(logBox, 'bad', 'REST 直寫失敗', 'HTTP ' + res.status + ' ' + (await res.text()).slice(0, 200), Date.now() - t0);
+    } catch (e) {
+      say(logBox, 'bad', 'REST 直寫例外', errText(e), Date.now() - t0);
+    }
+    cleanup(c.id);
+  }
+
+  // ---------- ② 凍結測試 ----------
+  var pending = null;
+
+  function startFreezeTest(shouldLeave, mode) {
+    if (typeof firebase === 'undefined') { say(freezeBox, 'bad', '無法測試', '請先按上面的「開始診斷」'); return; }
+    var doc = probeDoc(mode === 'beacon' ? 'beacon' : (shouldLeave ? 'freeze' : 'stay'));
+    pending = { id: doc.id, at: Date.now(), leave: shouldLeave, mode: mode };
+    freezeBox.innerHTML = '';
+    say(freezeBox, '', shouldLeave ? '已送出，請立刻切走！' : '已送出，請停在這頁別動',
+      (mode === 'beacon' ? '（走修好後的 sendBeacon 通道）' : '（走目前正式站的 SDK 通道）')
+      + (shouldLeave ? '切到別的分頁或按 Home，5 秒後回來' : '5 秒後自動查結果'));
+
+    if (mode === 'beacon') {
+      // 修好後的做法：分頁被切走的瞬間用 sendBeacon 把訂單送出去
+      var url = REST + '?documentId=' + encodeURIComponent(doc.id) + '&key=' + FIREBASE_CONFIG.apiKey;
+      var blob = new Blob([JSON.stringify({ fields: restFields(doc) })], { type: 'text/plain;charset=UTF-8' });
+      var sent = false;
+      try { sent = navigator.sendBeacon(url, blob); } catch (e) { pending.sdkErr = errText(e); }
+      pending.sdkAck = sent ? 0 : null;
+      if (!sent && !pending.sdkErr) pending.sdkErr = 'sendBeacon 回報送不出去';
+    } else {
+      var app = firebase.apps.length ? firebase.app() : firebase.initializeApp(FIREBASE_CONFIG);
+      var db = firebase.firestore(app);
+      db.collection('orders').doc(doc.id).set(doc).then(function () {
+        if (pending) pending.sdkAck = Date.now() - pending.at;
+      }, function (e) {
+        if (pending) pending.sdkErr = errText(e);
+      });
+    }
+    if (!shouldLeave) setTimeout(checkFreeze, 5000);
+  }
+
+  // 用 REST 直接問雲端「那筆到底有沒有進來」——這是唯一可信的判準
+  async function checkFreeze() {
+    if (!pending) return;
+    var p = pending;
+    pending = null;
+    var res = await fetch(REST + '/' + p.id + '?key=' + FIREBASE_CONFIG.apiKey).catch(function () { return null; });
+    var arrived = !!(res && res.ok);
+    var detail = (p.mode === 'beacon' ? '【修好後的通道】' : '【目前正式站的通道】')
+      + '離開後經過 ' + Math.round((Date.now() - p.at) / 1000) + ' 秒'
+      + '／送出端回報=' + (p.sdkAck != null ? p.sdkAck + 'ms' : (p.sdkErr || '從來沒回來'));
+    if (arrived) say(freezeBox, 'ok', '有送達雲端', detail);
+    else say(freezeBox, 'bad', '沒有送達雲端 — 訂單就是這樣掉的', detail);
+    if (arrived) cleanup(p.id);
+  }
+
+  document.getElementById('freeze').addEventListener('click', function () { startFreezeTest(true, 'sdk'); });
+  document.getElementById('fixed').addEventListener('click', function () { startFreezeTest(true, 'beacon'); });
+  document.getElementById('stay').addEventListener('click', function () { startFreezeTest(false, 'sdk'); });
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && pending && pending.leave) setTimeout(checkFreeze, 1200);
+  });
+
+  document.getElementById('copy').addEventListener('click', function () {
+    var text = lines.join('\n');
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () { alert('已複製，貼給工程師就行'); },
+      function () { prompt('手動複製：', text); });
+    else prompt('手動複製：', text);
+  });
+})();
+</script>
+</body>
+</html>
