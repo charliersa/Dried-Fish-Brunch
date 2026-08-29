@@ -382,22 +382,34 @@ function ensureDb() {
     NET.raw = db; // 供斷線重連用（disableNetwork / enableNetwork）
     if (!_persistEnabled) {
       _persistEnabled = true;
-      try {
-        // 店裡的 Wi-Fi 環境會讓 Firestore 預設的串流連線反覆莫名斷掉
-        //（08/28 實測：串流半死不活，寫入全靠備用通道 8~10 秒補送）。
-        // 「自動偵測」偵測不到這種半死狀態，改成強制走長輪詢：
-        // 每次通訊都是一般的 HTTP 請求，跟備用通道一樣凍不死，代價只是多零點幾秒。
-        // 必須在任何資料操作之前設定，所以放在 enablePersistence 前面。
-        db.settings({ experimentalForceLongPolling: true, merge: true });
-      } catch (e) { console.warn('Firestore 連線設定略過', e); }
-      try {
-        // 單分頁持久化：兩個站同在 charliersa.github.io，先前的 synchronizeTabs 會讓廚房／
-        // 收銀／點餐所有分頁共選一個「主分頁」統一連線；Safari 把主分頁凍結（背景分頁、
-        // 鎖屏）後，其他分頁就只剩本機快取——畫面卡在「連不上雲端」，重連也救不回來。
-        // 改成每個分頁各自連線：第一個分頁擁有離線快取，其餘分頁照常即時同步（只是沒離線快取）。
-        db.enablePersistence()
-          .catch(e => console.warn('離線持久化未啟用（此分頁改用即時連線）：', e && e.code));
-      } catch (e) { console.warn('離線持久化呼叫失敗', e); }
+      // 08/28 曾在這裡加 db.settings({ experimentalForceLongPolling: true, merge: true })，
+      // 想解決店裡 Wi-Fi 讓串流半死不活的問題。08/29 用 test/diag.html 在 iPad 實測才發現：
+      // 這行從頭到尾都在拋 [invalid-argument]（強制長輪詢不能和 experimentalAutoDetectLongPolling
+      // 並存，而自動偵測自 SDK 9.22 / 2023-05 起預設就是開的），錯誤被 catch 吞掉，
+      // 設定一次也沒生效過。自動偵測本來就會在需要時自己切成長輪詢，所以這裡不再強制；
+      // 真的要強制的話，正確寫法是同時給 experimentalAutoDetectLongPolling: false。
+
+      // 離線持久化只在非 iOS 裝置啟用。
+      // 08/29 iPadOS 17.7 實測（test/diag.html）：enablePersistence() 卡住不回應，
+      // 而且會把整個 Firestore 實例一起拖死 —— 同一頁的讀取 12 秒逾時、寫入 15 秒逾時，
+      // 送出的訂單就這樣永遠卡在裝置裡，畫面卻顯示「訂單已送出」，廚房一筆也收不到
+      //（08/29 兩台 iPad 與一支 iPhone 全中，Android 與桌機正常）。
+      // 同一支診斷頁裡另開一個「沒有啟用持久化」的實例，寫入只要 431 毫秒。
+      // 連帶一提：連線偵測器的 onSnapshot 也會被一起卡死，所以連紅色斷線橫幅都不會出現。
+      // iPad／iPhone 不論用 Safari 還是 Chrome 都是同一套 WebKit，一律跳過。
+      // 少掉的離線能力由「新訂單保證送達佇列 + REST 輪詢備援 + localStorage 備份」承擔。
+      if (isIOSDevice()) {
+        console.info('[firestore] iOS 裝置跳過離線持久化：WebKit 會讓 enablePersistence 卡死整個連線');
+      } else {
+        try {
+          // 單分頁持久化：兩個站同在 charliersa.github.io，先前的 synchronizeTabs 會讓廚房／
+          // 收銀／點餐所有分頁共選一個「主分頁」統一連線；Safari 把主分頁凍結（背景分頁、
+          // 鎖屏）後，其他分頁就只剩本機快取——畫面卡在「連不上雲端」，重連也救不回來。
+          // 改成每個分頁各自連線：第一個分頁擁有離線快取，其餘分頁照常即時同步（只是沒離線快取）。
+          db.enablePersistence()
+            .catch(e => console.warn('離線持久化未啟用（此分頁改用即時連線）：', e && e.code));
+        } catch (e) { console.warn('離線持久化呼叫失敗', e); }
+      }
     }
     startNetSensor(db);
     return db;
@@ -474,6 +486,7 @@ function initSync(onChange, opts) {
   SYNC.todayOnly = !!opts.today;
   SYNC.lastSnapAt = Date.now();
   expireStaleBackup(); // 太久沒更新的本機備份直接作廢，避免斷線時顯示舊數字
+  pnewSchedule(); // 上次沒送到雲端的訂單（被凍結分頁腰斬的），開頁就繼續補送
   pendSchedule(); // 上次沒送出去的狀態變更（重新整理前卡住的），開頁就繼續補送
   pdelSchedule(); // 上次沒刪成的訂單，開頁繼續補刪
   startPollWatchdog(); // 穩定模式：即時串流凍死時自動改用 REST 輪詢收單
@@ -551,11 +564,13 @@ function startLocalSync() {
 
 function syncAddOrder(order) {
   if (SYNC.mode === 'cloud' && SYNC.db) {
+    pnewRemember(order); // 先記帳：SDK 佇列送不出去也會自動補送（見下方新訂單保證送達佇列）
     // sentAt 由伺服器蓋章：手機時鐘不準時，watchOrderAck 會用它校正 createdAt
     const doc = Object.assign({}, order);
     try { doc.sentAt = firebase.firestore.FieldValue.serverTimestamp(); } catch (e) {}
     return SYNC.db.collection('orders').doc(String(order.id)).set(doc)
-      .catch(e => console.warn('新增訂單失敗', e));
+      .then(() => pnewConfirm(order.id)) // 伺服器真的收到才銷帳
+      .catch(e => console.warn('新增訂單失敗（已排入自動補送）', e));
   }
   const orders = loadOrders();
   orders.push(order);
@@ -613,6 +628,13 @@ function applyPendingOverlay(list) {
   // 刪除中的訂單一律不顯示（快照/輪詢/備份哪條路來的都一樣），刪除才不會「彈回來」
   const del = pdelLoad();
   if (Object.keys(del).length) list = list.filter(o => !del[String(o.id)]);
+  // 還在補送、雲端還沒有的新訂單先併回清單：顧客的訂單狀態頁不能讓它憑空消失
+  const news = pnewLoad();
+  Object.keys(news).forEach(id => {
+    if (del[id]) return;
+    if (list.some(o => String(o.id) === id)) return;
+    list = list.concat([news[id].order]);
+  });
   const map = pendLoad();
   const ids = Object.keys(map);
   if (!ids.length) return list;
@@ -712,6 +734,116 @@ function pdelFlush() {
       { method: 'DELETE' })
       .then(res => { if (res.ok) pdelConfirm(id); })
       .catch(() => {}); // 打不通等下一輪
+  });
+}
+
+// ===== 新訂單「保證送達」佇列 =====
+// 顧客按下送出後畫面立刻顯示「訂單已送出」（樂觀更新），但 Firestore 的寫入這時可能還在飛。
+// iOS（iPad／iPhone，Safari 與 Chrome 都是同一套 WebKit）只要分頁一切走就立刻凍結 JS 與
+// 網路請求 —— 而店員的習慣正是「按完送出馬上切到廚房分頁看」，那筆寫入就這樣被腰斬，
+// 卡在 SDK 的記憶體佇列裡，重新整理後連佇列都不見了（08/29 兩台 iPad 與一支 iPhone 全中，
+// 雲端一筆都沒有，但畫面從頭到尾都顯示送出成功）。
+// 狀態變更與刪除早就各有一條補送佇列，唯獨「新增訂單」沒有 —— 也就是最不能掉的那一筆。
+// 這裡比照辦理：整筆訂單先記進 localStorage（重新整理不丟）
+// ① SDK 4 秒內沒回報成功，就改走 Firestore REST 直連通道補送（每 3 秒重試）
+// ② 伺服器確認收到（SDK 回應、REST 建立成功、或雲端已經有這筆）才銷帳
+// ③ 還沒銷帳的訂單由 applyPendingOverlay 併回畫面，顧客的訂單狀態頁不會憑空消失
+const PNEW_KEY = 'xyg-pend-new';
+let _pnewTimer = null;
+function pnewLoad() { try { return JSON.parse(localStorage.getItem(PNEW_KEY) || '{}'); } catch (e) { return {}; } }
+function pnewSave(m) { try { localStorage.setItem(PNEW_KEY, JSON.stringify(m)); } catch (e) {} }
+function pnewRemember(order) {
+  const m = pnewLoad();
+  m[String(order.id)] = { order: order, ts: Date.now() };
+  pnewSave(m);
+  pnewSchedule();
+  pnewBindLeave();
+}
+// 分頁被切走／關掉的那一瞬間，把還沒送達的訂單用 keepalive 搶送出去。
+// 這是整個修法的關鍵：iOS 一切走就凍結 JS 與網路，補送計時器跟著凍住、普通的 fetch
+// 也會被腰斬；而 keepalive 的請求由瀏覽器接手在背景送完，不受頁面凍結影響 ——
+// 店員「按完送出馬上切到廚房分頁看」的習慣就不會再吃掉訂單。
+// 送出後不等回應（頁面已經凍了也讀不到），銷帳交給回到前景後的 pnewFlush 確認。
+let _pnewBound = false;
+function pnewBindLeave() {
+  if (_pnewBound || typeof document === 'undefined') return;
+  _pnewBound = true;
+  try {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') pnewFlushBeacon();
+    });
+    window.addEventListener('pagehide', pnewFlushBeacon);
+  } catch (e) {}
+}
+function pnewFlushBeacon() {
+  const m = pnewLoad();
+  Object.keys(m).forEach(id => {
+    if (beaconCreateOrder(m[id].order)) return; // 交給瀏覽器背景送完
+    try { restCreateOrder(m[id].order, true).catch(() => {}); } catch (e) {} // 沒有 sendBeacon 就退回 keepalive
+  });
+}
+// 用 navigator.sendBeacon 送：這是瀏覽器專為「頁面關掉前把資料送出去」設計的通道，
+// iOS WebKit 對它的支援比 fetch 的 keepalive 完整可靠，頁面凍結後仍會送完。
+// 走 POST documents/orders?documentId=<id>，語意等同「只在不存在時建立」——
+// 同一筆重送只會拿到 409，不會變成兩張單，也不會蓋掉廚房已經改過的狀態。
+// Content-Type 用 text/plain 是為了不觸發預檢請求（頁面正在卸載，預檢往往來不及送），
+// 已實測 Firestore REST 接受這個格式。
+function beaconCreateOrder(order) {
+  try {
+    if (typeof navigator === 'undefined' || !navigator.sendBeacon || typeof Blob === 'undefined') return false;
+    if (typeof FIREBASE_CONFIG === 'undefined' || !FIREBASE_CONFIG || !FIREBASE_CONFIG.apiKey) return false;
+    const doc = Object.assign({}, order);
+    delete doc.sentAt; // 伺服器蓋章的欄位不由本機補寫
+    const url = 'https://firestore.googleapis.com/v1/projects/' + FIREBASE_CONFIG.projectId
+      + '/databases/(default)/documents/orders?documentId=' + encodeURIComponent(String(order.id))
+      + '&key=' + FIREBASE_CONFIG.apiKey;
+    const body = new Blob([JSON.stringify({ fields: restFields(doc) })], { type: 'text/plain;charset=UTF-8' });
+    return navigator.sendBeacon(url, body);
+  } catch (e) { return false; }
+}
+function pnewConfirm(id) {
+  const m = pnewLoad();
+  if (!m[String(id)]) return;
+  delete m[String(id)];
+  pnewSave(m);
+}
+// 這筆訂單是否還沒送達雲端（還躺在補送佇列裡）——顧客端的送達確認用
+function isOrderPending(id) { return !!pnewLoad()[String(id)]; }
+function pnewSchedule() {
+  if (_pnewTimer) return;
+  _pnewTimer = setInterval(pnewFlush, 3000);
+}
+function pnewFlush() {
+  const m = pnewLoad();
+  const ids = Object.keys(m);
+  if (!ids.length) { clearInterval(_pnewTimer); _pnewTimer = null; return; }
+  ids.forEach(id => {
+    const ent = m[id];
+    if (Date.now() - ent.ts > 86400000) { pnewConfirm(id); return; } // 超過一天的舊帳放棄
+    if (Date.now() - ent.ts < 4000) return; // 先給 SDK 4 秒自己送
+    restCreateOrder(ent.order).then(() => pnewConfirm(id)).catch(() => {}); // 打不通就等下一輪
+  });
+}
+// 用 REST 直連通道補送整筆訂單。帶 currentDocument.exists=false：只在雲端還沒有這筆時才建立，
+// 廚房已經按過「開始製作／完成」的單絕不會被補送蓋回 new。若因為已存在而被拒，
+// 代表 SDK 其實送到了，直接銷帳。
+function restCreateOrder(order, keepalive) {
+  if (typeof FIREBASE_CONFIG === 'undefined' || !FIREBASE_CONFIG || !FIREBASE_CONFIG.apiKey) return Promise.reject(new Error('no config'));
+  const base = 'https://firestore.googleapis.com/v1/projects/' + FIREBASE_CONFIG.projectId
+    + '/databases/(default)/documents/orders/' + encodeURIComponent(String(order.id));
+  const doc = Object.assign({}, order);
+  delete doc.sentAt; // 伺服器蓋章的欄位不由本機補寫
+  return fetch(base + '?currentDocument.exists=false&key=' + FIREBASE_CONFIG.apiKey, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields: restFields(doc) }),
+    keepalive: !!keepalive, // 頁面被凍結／關掉後，瀏覽器仍會把這個請求送完
+  }).then(res => {
+    if (res.ok) return;
+    if (res.status !== 400 && res.status !== 409) throw new Error('REST ' + res.status);
+    // 400/409 可能是「文件已存在」：確認雲端真的有了才銷帳，其他原因照樣重試
+    return fetch(base + '?key=' + FIREBASE_CONFIG.apiKey)
+      .then(r => { if (!r.ok) throw new Error('REST ' + res.status); });
   });
 }
 

@@ -344,6 +344,7 @@
       itemDrink: -1,       // 已選的換飲料選項（item.addons 的索引；-1 = 維持套餐原本飲料）
       itemAdds: [],        // 已選的加購選項（item.addons 的索引，可複選）
       currentOrderId: null,
+      ack: null, // 送達確認：pending（送出中）/ sent（店家已收到）/ stuck（卡住，正在重試）
       submitting: false,
     };
 
@@ -675,6 +676,7 @@
             <div style="display:flex;align-items:center;gap:4px;margin:18px 4px 8px;flex-wrap:wrap;justify-content:center;">${stepHtml}</div>
             <div style="font-size:13px;margin-top:6px;${isReady ? 'color:#fff;font-weight:800;' : 'color:var(--ink-soft);'}">${isReady ? '🍽️ 餐點好囉！請到櫃台取餐' : '畫面會自動更新，請留意叫號'}</div>
           </div>
+          ${renderAckNotice()}
           ${!isReady ? renderPickupNotice(order) : ''}
           <div style="background:#fff;border-radius:18px;padding:16px;margin-top:14px;box-shadow:0 2px 6px rgba(28,94,122,.07);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
@@ -841,6 +843,8 @@
           else if (Notification.permission === 'denied') showMessage('通知被封鎖了，請到瀏覽器設定開啟');
         });
       } else if (action === 'new-order') {
+        stopAckWatch();
+        state.ack = null;
         state.currentOrderId = null;
         state.cart = [];
         state.diningType = '內用';
@@ -926,6 +930,47 @@
       } catch (e) {}
     }
 
+    // ===== 送達確認 =====
+    // 「訂單已送出」是樂觀更新，不等於店家真的收到：iOS 分頁一被凍結，寫入就卡在裝置裡，
+    // 而顧客從頭到尾只看得到成功畫面（08/29 iPad／iPhone 掉單就是這樣）。
+    // 這裡同時看兩條路，任一條確認就轉綠：
+    //   ① watchOrderAck：Firestore 回報 hasPendingWrites=false，代表伺服器收下了
+    //   ② isOrderPending：REST 補送佇列銷帳，SDK 整個卡死時就靠這條
+    // 超過 20 秒兩條都沒消息就轉紅，明白告訴顧客先別關掉頁面。
+    let _ackStop = null, _ackPoll = null, _ackTimer = null;
+    function startAckWatch(order) {
+      stopAckWatch();
+      // 連不上雲端（單機模式）時這筆根本沒送到店家，就要照實警示，不能顯示假的「已收到」
+      if (typeof SYNC === 'undefined' || SYNC.mode !== 'cloud') { state.ack = 'stuck'; return; }
+      state.ack = 'pending';
+      _ackStop = watchOrderAck(order.id, phase => { if (phase === 'sent') markAckSent(); });
+      _ackPoll = setInterval(() => { if (!isOrderPending(order.id)) markAckSent(); }, 2000);
+      _ackTimer = setTimeout(() => {
+        if (state.ack !== 'pending') return;
+        state.ack = 'stuck';
+        if (state.currentOrderId === order.id) renderCustomer();
+      }, 20000);
+    }
+    function markAckSent() {
+      const was = state.ack;
+      stopAckWatch();
+      state.ack = 'sent';
+      if (was !== 'sent' && state.currentOrderId) renderCustomer();
+    }
+    function stopAckWatch() {
+      if (_ackStop) { try { _ackStop(); } catch (e) {} _ackStop = null; }
+      if (_ackPoll) { clearInterval(_ackPoll); _ackPoll = null; }
+      if (_ackTimer) { clearTimeout(_ackTimer); _ackTimer = null; }
+    }
+    function renderAckNotice() {
+      const box = (bg, line, ink, main, sub) =>
+        `<div style="background:${bg};border:1.5px solid ${line};border-radius:14px;padding:10px 14px;margin-top:12px;text-align:center;color:${ink};font-weight:800;font-size:14px;">${main}<br><span style="font-weight:500;font-size:13px;">${sub}</span></div>`;
+      if (state.ack === 'sent') return box('#e6f6ee', '#54b98a', '#217a55', '✅ 店家已收到你的訂單', '可以放心切換畫面了');
+      if (state.ack === 'stuck') return box('#fdecea', '#e5534b', '#b3322b', '⚠️ 還沒送到店家，正在自動重試', '請保持這一頁開啟並檢查網路；若一直沒變綠，請直接告知櫃台');
+      if (state.ack === 'pending') return box('#fff8e6', '#f0b64b', '#a86a12', '⏳ 正在送到店家…', '請先別關掉或切走這一頁，送達後會變綠色');
+      return '';
+    }
+
     function submitOrder() {
       if (state.submitting) return; // 防連點：避免一次送出產生重複訂單
       if (cartCount() === 0) {
@@ -974,6 +1019,7 @@
       ensureOrderPush(order); // 取得推播 token 存進訂單（完成時才推播得到）
       notifyBackend(order); // 通知後端有新訂單（關網頁也會響）
       state.currentOrderId = order.id;
+      startAckWatch(order); // 監看這筆到底有沒有真的送到店家
       state.cart = [];
       state.cartOpen = false;
       // 送出流程結束就解鎖。以前只有「再點一單／回首頁」才會解鎖，一旦訂單被清掉、
