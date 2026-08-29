@@ -65,6 +65,8 @@
   <script src="firebase-config.js"></script>
   <script src="neworder-sound.js"></script>
   <script src="shared.js"></script>
+  <!-- 後台心跳：遠端可查此頁 JS 是否還活著（凍結診斷用） -->
+  <script src="presence.js" data-page="收銀台" data-always="1"></script>
   <script>document.head.insertAdjacentHTML('beforeend', '<style>' + getSharedStyles() + '</style>');</script>
   <script>
     applyDeviceCodeFromUrl();
