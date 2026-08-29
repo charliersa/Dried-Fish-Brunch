@@ -288,6 +288,10 @@
         <div class="info-chip">⏰ 6:00–12:00</div>
       </div>
       <div class="address">📍 台南市東區長東街 106 號 · 現點現做，請耐心等候</div>
+      <div class="nav-pills">
+        <!-- 店家公告：沒有公告時自動隱藏；按下開啟懸浮公告視窗 -->
+        <button type="button" id="ann-pill" style="display:none;">📢 店家公告</button>
+      </div>
     </header>
     <main id="app"></main>
   </div>
@@ -298,6 +302,9 @@
   </div>
 
   <div id="toast" class="toast"></div>
+
+  <!-- 懸浮公告視窗掛載點 -->
+  <div id="ann-modal"></div>
 
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
@@ -936,6 +943,7 @@
       if (state.currentOrderId || state.showBoard) renderCustomer();
     }, { today: true });
     initConfig(() => {
+      syncAnnouncementUI(); // 公告按鈕在標題列，跟點餐畫面分開更新
       if (!state.currentOrderId) renderCustomer();
     });
 
