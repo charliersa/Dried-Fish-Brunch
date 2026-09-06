@@ -772,16 +772,38 @@
     }
 
     // 同步當日報表到 Google Sheet（Apps Script Web App）
-    async function syncDayToSheet(dateStr) {
+    // 試算表分頁名稱：日報用日期、週報用起訖、月報用年月。
+    // （Google Sheets 的分頁名稱不能有 : \ / ? * [ ]，所以週報用 ~ 連接）
+    function reportSheetName(r, dateStr) {
+      if (r.period === 'month') return entMonthKey(r.start.getTime());
+      if (r.period === 'week') return dayKey(r.start.getTime()) + '~' + dayKey(r.end.getTime());
+      return dateStr;
+    }
+
+    // 同步報表到 Google Sheet。期間跟著畫面上的日報／週報／月報走——
+    // 月底要整理整個月時，選「月報」再按同步，一次上傳整月。
+    async function syncReportToSheet(dateStr) {
       if (!dateStr) { showMessage('請選擇日期'); return; }
       const url = ((cfg && cfg.sheetUrl) || DEFAULT_SHEET_URL || '').trim();
       if (!url) { showMessage('請先填寫並儲存 Google Sheet 連結網址'); return; }
-      const r = buildReportData(dateStr);
+      const r = buildPeriodReport(dateStr, reportPeriod);
+      const sheet = reportSheetName(r, dateStr);
       const payload = {
-        date: dateStr, store: '小魚乾早午餐',
-        summary: { count: r.count, paidCount: r.paidCount, unpaidCount: r.unpaidCount, revenue: r.revenue, cashCount: r.cashCount, cashSum: r.cashSum, mobileCount: r.mobileCount, mobileSum: r.mobileSum },
-        orders: r.day.map(o => ({ no: o.no, time: fmtTime(o.createdAt), typeTable: o.type + ' · ' + (o.table || ''), status: (STATUS[o.status] || {}).label || o.status || '', pay: payText(o), total: o.total || 0 })),
-        items: r.items
+        date: dateStr, sheet, period: r.period, label: r.label, store: '小魚乾早午餐',
+        range: { start: dayKey(r.start.getTime()), end: dayKey(r.end.getTime()) },
+        summary: { count: r.count, paidCount: r.paidCount, unpaidCount: r.unpaidCount, revenue: r.revenue, cashCount: r.cashCount, cashSum: r.cashSum, mobileCount: r.mobileCount, mobileSum: r.mobileSum, dineIn: r.dineIn, takeout: r.takeout },
+        // 日報只有一天，逐日明細沒有意義
+        perDay: r.period === 'day' ? [] : r.perDay,
+        items: r.items,
+        cats: r.cats,
+        orders: r.day.map(o => ({ no: o.no, date: dayKey(o.createdAt), time: fmtTime(o.createdAt), typeTable: o.type + ' · ' + (o.table || ''), status: (STATUS[o.status] || {}).label || o.status || '', pay: payText(o), total: o.total || 0 })),
+        // 成本與薪資只有月報放得進去才有意義（本來就是整月的金額）
+        costs: r.period === 'month' ? r.costs.map(c => ({ label: c.label, amount: c.amount || 0 })) : [],
+        costTotal: r.period === 'month' ? r.costTotal : null,
+        staff: r.period === 'month' ? r.staffRows : [],
+        payrollTotal: r.period === 'month' ? r.payrollTotal : null,
+        profit: r.period === 'month' ? r.profit : null,
+        entSource: r.entSource, entExact: r.entExact,
       };
       try {
         // Content-Type 用 text/plain 才不會觸發預檢請求（Apps Script 不處理 OPTIONS）。
@@ -793,8 +815,7 @@
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify(payload),
         });
-        const r = sheetSyncResult(res.status, await res.text(), dateStr);
-        showMessage(r.msg);
+        showMessage(sheetSyncResult(res.status, await res.text(), sheet).msg);
       } catch (e) {
         // CORS 被擋、斷網、Apps Script 沒開放權限都會走到這裡。
         // 請求其實已經送出去了，但我們無從得知有沒有寫進去，所以不能報成功。
@@ -1302,7 +1323,7 @@
               <button data-action="rpt-month" style="${tbtn(reportPeriod === 'month')}">月報</button>
             </div>
             <button class="add-btn" data-action="hist-print">📑 報表預覽 / 存 PDF</button>
-            <button class="add-btn" data-action="hist-sync">📊 同步到 Google Sheet</button>
+            <button class="add-btn" data-action="hist-sync">📊 同步${reportPeriod === 'month' ? '整月' : reportPeriod === 'week' ? '整週' : '當日'}到 Google Sheet</button>
           </div>
           <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">營收／訂單／品項為真實歷史資料；成本／薪資取該月封存值（每次修改自動封存，查不到會退回目前設定值並在報表上註明）；食材／設備為目前現況。</div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;">
@@ -1922,7 +1943,7 @@
       else if (a === 'rpt-week') { reportPeriod = 'week'; renderAdmin(); }
       else if (a === 'rpt-month') { reportPeriod = 'month'; renderAdmin(); }
       else if (a === 'hist-print') { printDayReport(currentReportDate()); }
-      else if (a === 'hist-sync') { syncDayToSheet(currentReportDate()); }
+      else if (a === 'hist-sync') { syncReportToSheet(currentReportDate()); }
       else if (a === 'hist-save-sheet') { const el = document.getElementById('sheet-url'); cfg = Object.assign({}, cfg, { sheetUrl: el ? el.value.trim() : '' }); saveConfig(cfg); showMessage('已儲存 Google Sheet 連結'); }
       else if (a === 'save-close-time') { const el = document.getElementById('close-time'); const en = document.getElementById('close-enabled'); cfg = Object.assign({}, cfg, { closeTime: (el && el.value) || '11:50', closeEnabled: !!(en && en.checked) }); saveConfig(cfg); showMessage(cfg.closeEnabled ? ('已啟用結單時間：' + cfg.closeTime) : '已暫停結單（測試模式）'); }
       else if (a === 'menu-reset-default') { resetMenuToDefault(); }
