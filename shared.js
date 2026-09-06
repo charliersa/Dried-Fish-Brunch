@@ -1110,7 +1110,8 @@ function defaultConfig() {
 function normalizeConfig(d) {
   if (!d) d = defaultConfig();
   d.menu = (d.menu && d.menu.length) ? d.menu : CURRENT_MENU;
-  d.ent = Object.assign({ staff: [], ingredients: [], equipment: [], costs: [] }, d.ent || {});
+  d.ent = Object.assign({ staff: [], ingredients: [], equipment: [], costs: [], monthly: {} }, d.ent || {});
+  if (!d.ent.monthly || typeof d.ent.monthly !== 'object') d.ent.monthly = {};
   d.announcements = Array.isArray(d.announcements) ? d.announcements : []; // 公告欄（後台手動新增）
   d.closeTime = d.closeTime || '11:50'; // 結單時間（HH:MM）：啟用後此時間起顧客停止點餐
   if (typeof d.closeEnabled !== 'boolean') d.closeEnabled = false; // 結單開關，預設關閉（暫停）
@@ -1339,7 +1340,43 @@ function saveConfig(data) {
 function saveMenu(menu) {
   return saveConfig(Object.assign({}, CONFIG.data || defaultConfig(), { menu }));
 }
+// ===== 成本／薪資的月度封存 =====
+// 成本、薪資本來只存「目前這一份」，改了就把舊值蓋掉，所以回頭查上個月的月報時，
+// 看到的其實是改完之後的新數字。這裡每次存檔順手把當月的成本／薪資封存一份，
+// 往後每個月的數字都留得住。（食材庫存與設備狀態本來就是「現況」，不封存。）
+function entMonthKey(ts) {
+  const d = new Date(ts == null ? Date.now() : ts);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+
+// 取某個月份該用的成本／薪資：
+// 1. 該月有封存 → 直接用（exact = true）
+// 2. 沒有 → 往前找最近一次封存（那個月之後沒改過，所以數字仍然適用）
+// 3. 都沒有 → 退回目前設定值（舊資料沒有任何封存時的情況，例如八月以前）
+function entForMonth(ent, ts) {
+  ent = ent || {};
+  const monthly = ent.monthly || {};
+  const want = entMonthKey(ts);
+  if (monthly[want]) return { costs: monthly[want].costs || [], staff: monthly[want].staff || [], source: want, exact: true };
+  const older = Object.keys(monthly).filter(k => k < want).sort();
+  if (older.length) {
+    const k = older[older.length - 1];
+    return { costs: monthly[k].costs || [], staff: monthly[k].staff || [], source: k, exact: false };
+  }
+  return { costs: ent.costs || [], staff: ent.staff || [], source: '', exact: false };
+}
+
 function saveEnt(ent) {
+  // 舊的封存以 CONFIG.data 為準：呼叫端手上的 ent 可能是雲端快照回來前的舊物件，
+  // 直接用它的 monthly 會把先前幾個月的封存洗掉。
+  const keep = (CONFIG.data && CONFIG.data.ent && CONFIG.data.ent.monthly) || {};
+  const monthly = Object.assign({}, keep, ent.monthly || {});
+  monthly[entMonthKey()] = {
+    costs: JSON.parse(JSON.stringify(ent.costs || [])),
+    staff: JSON.parse(JSON.stringify(ent.staff || [])),
+    savedAt: Date.now(),
+  };
+  ent = Object.assign({}, ent, { monthly });
   return saveConfig(Object.assign({}, CONFIG.data || defaultConfig(), { ent }));
 }
 

@@ -611,11 +611,12 @@
       paid.forEach(o => (o.items || []).forEach(it => { const cn = catNameOf(it); catMap[cn] = (catMap[cn] || 0) + priceOf(it) * it.qty; }));
       const cats = Object.keys(catMap).map(n => ({ name: n, value: catMap[n] })).sort((a, b) => b.value - a.value);
 
-      // 管理模組快照（本月／目前設定值）
+      // 成本／薪資：用報表期間所屬月份的封存值（查不到才退回目前設定值）
       const ent = (cfg && cfg.ent) || {};
-      const costs = ent.costs || [];
+      const snap = entForMonth(ent, rg.start.getTime());
+      const costs = snap.costs;
       const costTotal = costs.reduce((acc, c) => acc + (c.amount || 0), 0);
-      const staffRows = (ent.staff || []).map(st => ({ name: st.name, role: st.role, wage: st.wage, hours: st.hours, pay: (st.wage || 0) * (st.hours || 0) }));
+      const staffRows = snap.staff.map(st => ({ name: st.name, role: st.role, wage: st.wage, hours: st.hours, pay: (st.wage || 0) * (st.hours || 0) }));
       const payrollTotal = staffRows.reduce((acc, r) => acc + r.pay, 0);
       const ingredients = ent.ingredients || [];
       const equipment = ent.equipment || [];
@@ -627,6 +628,7 @@
         revenue, cashCount: cash.length, cashSum: sum(cash), mobileCount: mobile.length, mobileSum: sum(mobile),
         dineIn, takeout, day, perDay, items, cats,
         costs, costTotal, staffRows, payrollTotal, ingredients, equipment,
+        entMonth: entMonthKey(rg.start.getTime()), entSource: snap.source, entExact: snap.exact,
         profit: revenue - costTotal - payrollTotal,
       };
     }
@@ -637,6 +639,10 @@
       const r = buildPeriodReport(dateStr, reportPeriod);
       const isMonth = reportPeriod === 'month';
       const periodWord = reportPeriod === 'month' ? '本月' : reportPeriod === 'week' ? '本週' : '當日';
+      // 成本／薪資這兩塊到底用了哪一份數字，要在報表上講清楚，否則損益會被誤讀
+      const entTag = r.entExact ? (r.entMonth + ' 封存值')
+        : r.entSource ? ('沿用 ' + r.entSource + ' 封存值')
+        : '目前設定值·該月無封存';
 
       const sumRows = `
         <table>
@@ -664,12 +670,13 @@
         <div class="rpt-h2">簡易損益${isMonth ? '（月）' : ''}</div>
         <table>
           <tr><th>${periodWord}營收</th><td style="text-align:right">$${r.revenue}</td></tr>
-          <tr><th>本月成本</th><td style="text-align:right">－$${r.costTotal}</td></tr>
-          <tr><th>本月薪資</th><td style="text-align:right">－$${r.payrollTotal}</td></tr>
+          <tr><th>成本（${escapeHtml(entTag)}）</th><td style="text-align:right">－$${r.costTotal}</td></tr>
+          <tr><th>薪資（${escapeHtml(entTag)}）</th><td style="text-align:right">－$${r.payrollTotal}</td></tr>
           <tr><th>結餘（營收－成本－薪資）</th><td style="text-align:right;font-weight:900;color:${r.profit >= 0 ? '#1c5e7a' : '#e5534b'};">$${r.profit}</td></tr>
           <tr><th>毛利率（結餘 ÷ 營收）</th><td style="text-align:right;font-weight:900;color:${r.profit >= 0 ? '#1c5e7a' : '#e5534b'};">${r.revenue > 0 ? Math.round(r.profit / r.revenue * 100) : 0}%</td></tr>
         </table>
-        ${isMonth ? '' : '<div class="rpt-sub">※ 成本與薪資為「本月固定值」，與本期間營收相比僅供參考；損益建議看「月報」。</div>'}`;
+        ${r.entExact ? '' : `<div class="rpt-sub">※ ${r.entSource ? (r.entMonth + ' 沒有成本／薪資的封存紀錄，改用最近一次封存的 ' + r.entSource + '；期間內若有異動，數字會有落差。') : '這個月份早於系統開始封存成本／薪資的時間，只能用目前的設定值代入，僅供參考。'}</div>`}
+        ${isMonth ? '' : '<div class="rpt-sub">※ 成本與薪資是整個月的金額，與本期間營收相比僅供參考；損益建議看「月報」。</div>'}`;
 
       const area = document.getElementById('print-area');
       area.innerHTML = `
@@ -687,8 +694,8 @@
         <div class="rpt-h2">分類營收</div><table><tr><th>分類</th><th style="text-align:right">營收</th></tr>${catRows}</table>
         <div class="rpt-h2">訂單明細</div><table><tr><th>取餐號</th><th>時間</th><th>類型/桌號</th><th>品項</th><th>付款</th><th style="text-align:right">金額</th></tr>${orderRows}</table>
 
-        <div class="rpt-h2">成本（本月）</div><table><tr><th>項目</th><th style="text-align:right">金額</th></tr>${costRows}<tr><th>合計</th><th style="text-align:right">$${r.costTotal}</th></tr></table>
-        <div class="rpt-h2">薪資（本月）</div><table><tr><th>姓名</th><th>職務</th><th style="text-align:right">時薪</th><th style="text-align:right">時數</th><th style="text-align:right">薪資</th></tr>${staffRows}<tr><th colspan="4">合計</th><th style="text-align:right">$${r.payrollTotal}</th></tr></table>
+        <div class="rpt-h2">成本（${escapeHtml(entTag)}）</div><table><tr><th>項目</th><th style="text-align:right">金額</th></tr>${costRows}<tr><th>合計</th><th style="text-align:right">$${r.costTotal}</th></tr></table>
+        <div class="rpt-h2">薪資（${escapeHtml(entTag)}）</div><table><tr><th>姓名</th><th>職務</th><th style="text-align:right">時薪</th><th style="text-align:right">時數</th><th style="text-align:right">薪資</th></tr>${staffRows}<tr><th colspan="4">合計</th><th style="text-align:right">$${r.payrollTotal}</th></tr></table>
         ${profitSection}
 
         <div class="rpt-h2">食材庫存（目前）</div><table><tr><th>品名</th><th style="text-align:right">庫存</th><th style="text-align:right">安全量</th><th>狀態</th><th>供應商</th></tr>${ingRows}</table>
@@ -1153,7 +1160,7 @@
             <button class="add-btn" data-action="hist-print">🖨️ 列印 / 另存 PDF</button>
             <button class="add-btn" data-action="hist-sync">📊 同步到 Google Sheet</button>
           </div>
-          <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">營收／訂單／品項為真實歷史資料；成本／薪資／食材／設備為本月或目前設定值快照。</div>
+          <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">營收／訂單／品項為真實歷史資料；成本／薪資取該月封存值（每次修改自動封存，查不到會退回目前設定值並在報表上註明）；食材／設備為目前現況。</div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;">
             <label style="font-size:12px;color:var(--ink-soft);white-space:nowrap;">Google Sheet 連結</label>
             <input id="sheet-url" placeholder="貼上 Apps Script Web App 網址" value="${escapeHtml(cfg.sheetUrl || DEFAULT_SHEET_URL)}" style="flex:1;min-width:200px;border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;">
