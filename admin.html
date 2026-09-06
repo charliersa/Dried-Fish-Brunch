@@ -921,6 +921,45 @@
         </div>`;
     }
 
+    // ===== 一次性補登：2026-08 =====
+    // 八月的成本只記在紙本帳本（試算表的 202608 分頁），系統開始按月封存之前的月份都沒有資料。
+    // 補完之後 needsAug2026Backfill() 就是 false，按鈕自己消失；確定不需要了可以連這段一起刪掉。
+    const BACKFILL_2026_08 = {
+      costs: [
+        { id: 'm202608-food',  label: '食材支出',        amount: 11106 },
+        { id: 'm202608-power', label: '電（6/9-8/10）', amount: 2981  },
+        { id: 'm202608-rent',  label: '房租',            amount: 11000 },
+        { id: 'm202608-gas',   label: '瓦斯',            amount: 1280  },
+      ],
+      staff: [], // 帳本八月人事費用 0
+      note: '由 202608 帳本補登',
+    };
+    const backfillTotal = () => BACKFILL_2026_08.costs.reduce((a, c) => a + c.amount, 0);
+    const needsAug2026Backfill = () => !(((cfg && cfg.ent && cfg.ent.monthly) || {})['2026-08']);
+
+    async function backfillAug2026() {
+      if (!isConfigLoaded()) { showMessage('⚠️ 雲端資料尚未載入完成，請稍候再操作'); return; }
+      const total = backfillTotal();
+      const detail = BACKFILL_2026_08.costs.map(c => '　' + c.label + '　$' + c.amount).join('\n');
+      if (!confirm('要把 2026-08 的成本補登進封存嗎？\n\n' + detail + '\n　合計　$' + total
+        + '\n\n只會影響八月的報表，不會動到目前的成本設定。')) return;
+      // 以 CONFIG.data 為準：cfg 可能是雲端快照回來前的舊物件
+      const base = CONFIG.data || cfg;
+      const ent = base.ent || {};
+      const monthly = Object.assign({}, ent.monthly || {}, {
+        '2026-08': Object.assign({}, BACKFILL_2026_08, { savedAt: Date.now() }),
+      });
+      const next = Object.assign({}, base, { ent: Object.assign({}, ent, { monthly }) });
+      try {
+        await saveConfig(next);
+        cfg = next;
+        showMessage('已補登 2026-08 成本 $' + total + '，八月月報的損益現在是正確的 ✅');
+      } catch (e) {
+        showMessage('補登失敗：' + ((e && e.message) || '請稍後再試'));
+      }
+      renderAdmin();
+    }
+
     function tabCost() {
       const now = new Date();
       const payrollTotal = (cfg.ent.staff || []).reduce((a, s) => a + (s.wage || 0) * (s.hours || 0), 0);
@@ -963,6 +1002,19 @@
           ${renderStat('客單價', money(avgOrder), 'var(--blue)')}
           ${renderStat('平均每單利潤', money(avgProfit), avgProfit >= 0 ? 'var(--green)' : '#e5534b')}
         </div>
+        ${needsAug2026Backfill() ? `
+        <div class="admin-card" style="margin-bottom:14px;border:1.5px solid var(--amber);">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:220px;">
+              <b>⚠️ 2026-08 沒有成本封存</b>
+              <div style="font-size:12px;color:var(--ink-soft);margin-top:4px;line-height:1.6;">
+                八月月報現在會拿「目前設定值」當成本，損益不準。可依紙本帳本補登：
+                ${BACKFILL_2026_08.costs.map(c => escapeHtml(c.label) + ' $' + c.amount).join('、')}，合計 <b>$${backfillTotal()}</b>。
+              </div>
+            </div>
+            <button class="add-btn" data-action="backfill-aug">📥 補登 2026-08</button>
+          </div>
+        </div>` : ''}
         <div class="admin-card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
             <h3 style="margin:0;">本月成本明細</h3>
@@ -1860,6 +1912,7 @@
       else if (a === 'fb-week') { fbScope = 'week'; renderAdmin(); }
       else if (a === 'fb-all') { fbScope = 'all'; renderAdmin(); }
       else if (a === 'fb-del') { if (confirm('確定刪除這筆顧客回饋？此動作無法復原，且會從雲端同步移除。')) deleteFeedback(id); }
+      else if (a === 'backfill-aug') { backfillAug2026(); }
       else if (a === 'rpt-day') { reportPeriod = 'day'; renderAdmin(); }
       else if (a === 'rpt-week') { reportPeriod = 'week'; renderAdmin(); }
       else if (a === 'rpt-month') { reportPeriod = 'month'; renderAdmin(); }
