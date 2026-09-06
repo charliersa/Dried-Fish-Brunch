@@ -39,6 +39,13 @@
 // 試算表「小魚乾早午餐紀錄」
 const SHEET_ID = '1cr28PeeNfPnmGRvL3d9biJbY5jgvy8iark_n4GuIlKg';
 
+// 配色沿用網站（--ink / --pink / --line），讓試算表跟後台看起來是同一套系統
+const C = {
+  ink: '#1c5e7a', pink: '#ec6398', head: '#eef5f8', band: '#f7fbfd',
+  line: '#cfe0e8', good: '#1c7a4d', bad: '#c0392b', sub: '#6b7f88',
+};
+const MONEY = '$#,##0';
+
 function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
@@ -53,7 +60,7 @@ function doGet() {
   }
 }
 
-// 金額前面加單引號 → 強制當文字，避免 6:32 被吃成時間、純數字單號被轉型
+// 前面加單引號 → 強制當文字，避免 6:32 被吃成時間、純數字單號被轉型
 function txt_(v) { return "'" + (v == null ? '' : String(v)); }
 
 function doPost(e) {
@@ -67,91 +74,136 @@ function doPost(e) {
     const ss = SpreadsheetApp.openById(SHEET_ID);
     // 同一個期間重跑要整份覆蓋，不然分頁會越疊越多份
     let sh = ss.getSheetByName(name);
-    if (sh) sh.clear(); else sh = ss.insertSheet(name);
+    if (sh) {
+      // 上一次套過的合併儲存格若不先拆開，寫入會直接失敗
+      try { sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart(); } catch (err) {}
+      sh.clear();
+    } else {
+      sh = ss.insertSheet(name);
+    }
 
     const s = p.summary || {};
     const period = p.period || 'day';
     const isMonth = period === 'month';
     const rows = [];
+    const sections = [];  // 區塊標題列（整列合併、粗體）
+    const heads = [];     // 表格欄位名稱列
+    const totals = [];    // 合計／結餘列（粗體）
+    const money = [];     // { r, c, n } 要套貨幣格式的直欄範圍
+    let profitRow = 0;
 
-    rows.push([(p.store || '') + ' ' + (p.label || name)]);
-    if (p.range && p.range.start) rows.push(['期間', p.range.start + ' ～ ' + p.range.end]);
-    rows.push(['總訂單', s.count, '已結帳', s.paidCount, '未結帳', s.unpaidCount]);
-    rows.push(['總營收', s.revenue,
-               '現金', s.cashSum + '(' + s.cashCount + '筆)',
-               '行動', s.mobileSum + '(' + s.mobileCount + '筆)']);
+    const push = r => rows.push(r);                 // 一般資料列
+    const at = () => rows.length;                   // 剛推進去那列的列號（1-based）
+    const section = t => { push([t]); sections.push(at()); };
+    const head = r => { push(r); heads.push(at()); };
+    const total = r => { push(r); totals.push(at()); };
+
+    // ── 標題 ────────────────────────────────────────────────
+    push([(p.store || '') + '　' + (p.label || name)]);
+    if (p.range && p.range.start) push(['期間', p.range.start + ' ～ ' + p.range.end]);
+
+    // ── 營收摘要 ────────────────────────────────────────────
+    section('營收摘要');
+    head(['總訂單', s.count, '已結帳', s.paidCount, '未結帳', s.unpaidCount]);
+    push(['總營收', s.revenue,
+          '現金', s.cashSum + '(' + s.cashCount + '筆)',
+          '行動', s.mobileSum + '(' + s.mobileCount + '筆)']);
+    money.push({ r: at(), c: 2, n: 1 });
     if (s.dineIn != null) {
-      rows.push(['內用', s.dineIn, '外帶', s.takeout,
-                 '平均客單', s.paidCount ? Math.round(s.revenue / s.paidCount) : 0]);
+      push(['內用', s.dineIn, '外帶', s.takeout,
+            '平均客單', s.paidCount ? Math.round(s.revenue / s.paidCount) : 0]);
+      money.push({ r: at(), c: 6, n: 1 });
     }
 
-    // 逐日明細（週報／月報才有）
+    // ── 逐日明細（週報／月報才有）────────────────────────────
     if (p.perDay && p.perDay.length) {
-      rows.push([]);
-      rows.push(['逐日明細']);
-      rows.push(['日期', '訂單數', '已結帳', '營收']);
-      p.perDay.forEach(function (d) { rows.push([txt_(d.date), d.count, d.paidCount, d.revenue]); });
-      rows.push(['合計', s.count, s.paidCount, s.revenue]);
+      push([]);
+      section('逐日明細');
+      head(['日期', '訂單數', '已結帳', '營收']);
+      const first = at() + 1;
+      p.perDay.forEach(function (d) { push([txt_(d.date), d.count, d.paidCount, d.revenue]); });
+      total(['合計', s.count, s.paidCount, s.revenue]);
+      money.push({ r: first, c: 4, n: p.perDay.length + 1 });
     }
 
-    rows.push([]);
-    rows.push(['品項銷售統計']);
-    rows.push(['品項', '數量', '小計']);
-    (p.items || []).forEach(function (it) { rows.push([it.name, it.qty, it.rev]); });
+    // ── 品項銷售統計 ────────────────────────────────────────
+    push([]);
+    section('品項銷售統計');
+    head(['品項', '數量', '小計']);
+    const itFirst = at() + 1;
+    (p.items || []).forEach(function (it) { push([it.name, it.qty, it.rev]); });
+    if ((p.items || []).length) money.push({ r: itFirst, c: 3, n: p.items.length });
 
+    // ── 分類營收 ────────────────────────────────────────────
     if (p.cats && p.cats.length) {
-      rows.push([]);
-      rows.push(['分類營收']);
-      rows.push(['分類', '營收']);
-      p.cats.forEach(function (c) { rows.push([c.name, c.value]); });
+      push([]);
+      section('分類營收');
+      head(['分類', '營收']);
+      const cFirst = at() + 1;
+      p.cats.forEach(function (c) { push([c.name, c.value]); });
+      money.push({ r: cFirst, c: 2, n: p.cats.length });
     }
 
-    // 成本／薪資／損益：只有月報會帶
+    // ── 成本／薪資／損益：只有月報 ──────────────────────────
     if (isMonth && p.costTotal != null) {
       const tag = p.entExact ? (name + ' 封存值')
         : p.entSource ? ('沿用 ' + p.entSource + ' 封存值')
         : '目前設定值·該月無封存';
-      rows.push([]);
-      rows.push(['成本（' + tag + '）']);
-      rows.push(['項目', '金額']);
-      (p.costs || []).forEach(function (c) { rows.push([c.label, c.amount]); });
-      rows.push(['合計', p.costTotal]);
 
-      rows.push([]);
-      rows.push(['薪資（' + tag + '）']);
-      rows.push(['姓名', '職務', '時薪', '時數', '薪資']);
-      (p.staff || []).forEach(function (m) { rows.push([m.name, m.role, m.wage, m.hours, m.pay]); });
-      rows.push(['合計', '', '', '', p.payrollTotal]);
+      push([]);
+      section('成本（' + tag + '）');
+      head(['項目', '金額']);
+      const kFirst = at() + 1;
+      (p.costs || []).forEach(function (c) { push([c.label, c.amount]); });
+      total(['合計', p.costTotal]);
+      money.push({ r: kFirst, c: 2, n: (p.costs || []).length + 1 });
 
-      rows.push([]);
-      rows.push(['簡易損益']);
-      rows.push(['本月營收', s.revenue]);
-      rows.push(['本月成本', -p.costTotal]);
-      rows.push(['本月薪資', -p.payrollTotal]);
-      rows.push(['結餘', p.profit]);
-      rows.push(['毛利率', s.revenue > 0 ? Math.round(p.profit / s.revenue * 100) + '%' : '0%']);
+      push([]);
+      section('薪資（' + tag + '）');
+      head(['姓名', '職務', '時薪', '時數', '薪資']);
+      const wFirst = at() + 1;
+      (p.staff || []).forEach(function (m) { push([m.name, m.role, m.wage, m.hours, m.pay]); });
+      total(['合計', '', '', '', p.payrollTotal]);
+      money.push({ r: wFirst, c: 3, n: (p.staff || []).length + 1 });
+      money.push({ r: wFirst, c: 5, n: (p.staff || []).length + 1 });
+
+      push([]);
+      section('簡易損益');
+      push(['本月營收', s.revenue]);      money.push({ r: at(), c: 2, n: 1 });
+      push(['本月成本', -p.costTotal]);   money.push({ r: at(), c: 2, n: 1 });
+      push(['本月薪資', -p.payrollTotal]); money.push({ r: at(), c: 2, n: 1 });
+      total(['結餘', p.profit]);          money.push({ r: at(), c: 2, n: 1 });
+      profitRow = at();
+      total(['毛利率', s.revenue > 0 ? Math.round(p.profit / s.revenue * 100) + '%' : '0%']);
     }
 
-    rows.push([]);
-    rows.push(['訂單明細']);
-    // 日報同一天，不用重複列日期
-    if (isMonth || period === 'week') {
-      rows.push(['單號', '日期', '時間', '類型 / 桌號', '狀態', '付款', '金額']);
-      (p.orders || []).forEach(function (o) {
-        rows.push([txt_(o.no), txt_(o.date), txt_(o.time), o.typeTable, o.status, o.pay, o.total]);
-      });
-    } else {
-      rows.push(['單號', '時間', '類型 / 桌號', '狀態', '付款', '金額']);
-      (p.orders || []).forEach(function (o) {
-        rows.push([txt_(o.no), txt_(o.time), o.typeTable, o.status, o.pay, o.total]);
-      });
-    }
+    // ── 訂單明細 ────────────────────────────────────────────
+    push([]);
+    section('訂單明細');
+    const wide = isMonth || period === 'week'; // 跨日才需要日期欄
+    head(wide ? ['單號', '日期', '時間', '類型 / 桌號', '狀態', '付款', '金額']
+              : ['單號', '時間', '類型 / 桌號', '狀態', '付款', '金額']);
+    const oFirst = at() + 1;
+    (p.orders || []).forEach(function (o) {
+      push(wide ? [txt_(o.no), txt_(o.date), txt_(o.time), o.typeTable, o.status, o.pay, o.total]
+                : [txt_(o.no), txt_(o.time), o.typeTable, o.status, o.pay, o.total]);
+    });
+    const oCol = wide ? 7 : 6;
+    if ((p.orders || []).length) money.push({ r: oFirst, c: oCol, n: p.orders.length });
 
-    // setValues 要求每一列等寬
+    // ── 寫入 ────────────────────────────────────────────────
     const width = rows.reduce(function (m, r) { return Math.max(m, r.length); }, 1);
     rows.forEach(function (r) { while (r.length < width) r.push(''); });
     sh.getRange(1, 1, rows.length, width).setValues(rows);
-    sh.setFrozenRows(1);
+
+    // 排版失敗不該讓資料寫入跟著失敗，所以整段包起來
+    try {
+      beautify_(sh, {
+        width: width, lastRow: rows.length, sections: sections, heads: heads,
+        totals: totals, money: money, profitRow: profitRow,
+        profit: p.profit, orderFirst: oFirst, orderCount: (p.orders || []).length,
+      });
+    } catch (err) {}
 
     return json_({
       ok: true, sheet: name, period: period,
@@ -160,4 +212,68 @@ function doPost(e) {
   } catch (err) {
     return json_({ ok: false, error: String(err) });
   }
+}
+
+/** 套版面：標題、區塊、表頭、貨幣格式、隔行底色、欄寬 */
+function beautify_(sh, m) {
+  const W = m.width;
+
+  // 全表基底
+  sh.getRange(1, 1, m.lastRow, W)
+    .setFontFamily('Arial').setFontSize(10).setVerticalAlignment('middle');
+
+  // 主標題：整列合併、深色底、白字
+  sh.getRange(1, 1, 1, W).merge()
+    .setBackground(C.ink).setFontColor('#ffffff')
+    .setFontSize(14).setFontWeight('bold')
+    .setHorizontalAlignment('left');
+  sh.setRowHeight(1, 34);
+
+  // 期間那一列（如果有）用淡色小字
+  if (m.lastRow > 1) sh.getRange(2, 1, 1, W).setFontColor(C.sub);
+
+  // 區塊標題：整列合併、粉紅左邊界、粗體
+  m.sections.forEach(function (r) {
+    sh.getRange(r, 1, 1, W).merge()
+      .setBackground(C.head).setFontColor(C.ink).setFontWeight('bold')
+      .setBorder(null, true, null, null, null, null, C.pink, SpreadsheetApp.BorderStyle.SOLID_THICK);
+    sh.setRowHeight(r, 26);
+  });
+
+  // 表頭：粗體＋底線
+  m.heads.forEach(function (r) {
+    sh.getRange(r, 1, 1, W).setFontWeight('bold')
+      .setBorder(null, null, true, null, null, null, C.line, SpreadsheetApp.BorderStyle.SOLID);
+  });
+
+  // 合計／結餘：粗體
+  m.totals.forEach(function (r) { sh.getRange(r, 1, 1, W).setFontWeight('bold'); });
+
+  // 金額欄位套貨幣格式
+  m.money.forEach(function (x) { sh.getRange(x.r, x.c, x.n, 1).setNumberFormat(MONEY); });
+
+  // 結餘正負變色，一眼看出賺賠
+  if (m.profitRow) {
+    sh.getRange(m.profitRow, 1, 1, 2)
+      .setFontColor(m.profit >= 0 ? C.good : C.bad).setFontSize(12);
+  }
+
+  // 訂單明細隔行淡底，長長一列比較好對
+  if (m.orderCount > 1) {
+    for (let i = 1; i < m.orderCount; i += 2) {
+      sh.getRange(m.orderFirst + i, 1, 1, W).setBackground(C.band);
+    }
+  }
+
+  sh.setFrozenRows(1);
+
+  // 欄寬：先自動貼合，再夾在看得舒服的範圍內
+  try {
+    sh.autoResizeColumns(1, W);
+    for (let c = 1; c <= W; c++) {
+      const w = sh.getColumnWidth(c);
+      if (w < 80) sh.setColumnWidth(c, 80);
+      else if (w > 320) sh.setColumnWidth(c, 320);
+    }
+  } catch (err) {}
 }
