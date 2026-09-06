@@ -455,6 +455,9 @@
     let feedbacks = [];        // 顧客回饋清單（Firestore feedback 集合）
     let fbScope = 'all';       // 顧客回饋範圍：today / week / all
     let reportPeriod = 'day'; // 報表期間：day | week | month
+    // 報表日期：切日／週／月報或雲端快照都會重繪，日期要記在這裡才不會跳回今天
+    // （空字串代表使用者還沒選過，畫面上顯示今天；dayKey 定義在後面，不能在這裡先算）
+    let reportDate = '';
     let annDraft = { text: '', type: 'info' }; // 公告新增表單的暫存（重繪時不會被清掉）
     let annEdit = null;        // 正在編輯的公告 { id, text, type }
     let addonList = [];        // 附加商品清單（Firestore config/addons 的 list 欄位）
@@ -1108,6 +1111,11 @@
       return head + `<div class="admin-card">${rows}</div>`;
     }
 
+    // 目前報表要看的日期（沒選過就用今天）
+    const currentReportDate = () => reportDate || dayKey(Date.now());
+    // 重繪前先把日期欄位的值收進狀態，避免重繪後 input 被重建成今天
+    function captureReportDate() { const el = document.getElementById('hist-date'); if (el && el.value) reportDate = el.value; }
+
     function tabHistory() {
       const today = orders.filter(o => isToday(o.createdAt));
       const pool = histScope === 'today' ? today : orders;
@@ -1136,7 +1144,7 @@
           <h3 style="margin:0 0 10px;">📑 營運報表（日／週／月）</h3>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <label style="font-size:13px;">日期</label>
-            <input type="date" id="hist-date" value="${dayKey(Date.now())}" style="border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;">
+            <input type="date" id="hist-date" value="${currentReportDate()}" style="border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;">
             <div style="display:flex;gap:6px;">
               <button data-action="rpt-day" style="${tbtn(reportPeriod === 'day')}">日報</button>
               <button data-action="rpt-week" style="${tbtn(reportPeriod === 'week')}">週報</button>
@@ -1691,6 +1699,9 @@
           showMessage('已自動儲存 Google Sheet 連結');
         }, 1200);
       });
+      // 報表日期：選好就記進狀態，雲端快照觸發重繪也不會跳回今天
+      const _hd = document.getElementById('hist-date');
+      if (_hd) _hd.addEventListener('change', () => { if (_hd.value) reportDate = _hd.value; });
       // 公告輸入框：邊打邊存進暫存，雲端快照觸發重繪也不會把字弄丟
       const _annT = document.getElementById('ann-text');
       if (_annT) _annT.addEventListener('input', () => { annDraft.text = _annT.value; });
@@ -1741,6 +1752,8 @@
       if (a.indexOf('ann-') === 0) captureAnnInputs();
       // 附加商品彈窗的任何動作都會重繪，先把打到一半的字收回暫存
       if (a.indexOf('ao-') === 0) captureAddonModal();
+      // 報表相關動作都會重繪，先把選好的日期收進狀態（否則切月報會跳回今天）
+      if (a.indexOf('rpt-') === 0 || a.indexOf('hist-') === 0) captureReportDate();
       if (a === 'hist-today') { histScope = 'today'; renderAdmin(); }
       else if (a === 'hist-all') { histScope = 'all'; renderAdmin(); }
       else if (a === 'hist-del') { if (confirm('確定刪除這筆訂單？此動作無法復原，且會從雲端同步移除。')) syncDeleteOrder(id); }
@@ -1751,8 +1764,8 @@
       else if (a === 'rpt-day') { reportPeriod = 'day'; renderAdmin(); }
       else if (a === 'rpt-week') { reportPeriod = 'week'; renderAdmin(); }
       else if (a === 'rpt-month') { reportPeriod = 'month'; renderAdmin(); }
-      else if (a === 'hist-print') { const el = document.getElementById('hist-date'); printDayReport(el ? el.value : ''); }
-      else if (a === 'hist-sync') { const el = document.getElementById('hist-date'); syncDayToSheet(el ? el.value : ''); }
+      else if (a === 'hist-print') { printDayReport(currentReportDate()); }
+      else if (a === 'hist-sync') { syncDayToSheet(currentReportDate()); }
       else if (a === 'hist-save-sheet') { const el = document.getElementById('sheet-url'); cfg = Object.assign({}, cfg, { sheetUrl: el ? el.value.trim() : '' }); saveConfig(cfg); showMessage('已儲存 Google Sheet 連結'); }
       else if (a === 'save-close-time') { const el = document.getElementById('close-time'); const en = document.getElementById('close-enabled'); cfg = Object.assign({}, cfg, { closeTime: (el && el.value) || '11:50', closeEnabled: !!(en && en.checked) }); saveConfig(cfg); showMessage(cfg.closeEnabled ? ('已啟用結單時間：' + cfg.closeTime) : '已暫停結單（測試模式）'); }
       else if (a === 'menu-reset-default') { resetMenuToDefault(); }
