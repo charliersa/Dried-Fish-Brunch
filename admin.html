@@ -784,11 +784,38 @@
         items: r.items
       };
       try {
-        await fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
-        showMessage('已送出到 Google Sheet，請到試算表確認 ✅');
+        // Content-Type 用 text/plain 才不會觸發預檢請求（Apps Script 不處理 OPTIONS）。
+        // 這裡刻意不用 no-cors——那會讓回應變成 opaque，成功失敗都讀不到，
+        // 網址填錯也照樣顯示成功。
+        const res = await fetch(url, {
+          method: 'POST',
+          redirect: 'follow', // Apps Script 會 302 轉到 googleusercontent
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload),
+        });
+        const r = sheetSyncResult(res.status, await res.text(), dateStr);
+        showMessage(r.msg);
       } catch (e) {
-        showMessage('同步失敗：' + (e && e.message ? e.message : '請檢查網址'));
+        // CORS 被擋、斷網、Apps Script 沒開放權限都會走到這裡。
+        // 請求其實已經送出去了，但我們無從得知有沒有寫進去，所以不能報成功。
+        showMessage('⚠️ 無法確認同步結果（' + ((e && e.message) || '連線失敗') + '），請到試算表核對');
       }
+    }
+
+    // 判讀 Apps Script 的回應。分四種：確定成功／確定失敗／連得上但沒有確認資訊／HTTP 錯誤
+    function sheetSyncResult(status, text, dateStr) {
+      let data = null;
+      try { data = JSON.parse(String(text || '').trim()); } catch (e) {}
+      if (data && data.ok === true) {
+        return { ok: true, msg: '已寫入 Google Sheet「' + (data.sheet || dateStr) + '」'
+          + (data.rows != null ? ('，' + data.rows + ' 筆訂單') : '') + ' ✅' };
+      }
+      if (data && data.ok === false) {
+        return { ok: false, msg: '同步失敗：' + (data.error || 'Apps Script 回報錯誤') };
+      }
+      if (status >= 400) return { ok: false, msg: '同步失敗：Google Sheet 回應 HTTP ' + status };
+      // 舊版 Apps Script 只回 HTML、沒改成回傳 JSON
+      return { ok: false, msg: '已送出，但 Apps Script 沒回傳確認資訊，請到試算表核對' };
     }
     function catNameOf(it) {
       for (const c of CURRENT_MENU) for (const i of c.items) if (i.id === it.id || i.name === it.name) return c.name;
