@@ -803,19 +803,32 @@
     // 提示音音檔（HTMLAudio，相容性最高）；手機互動一次即解鎖
     const _alertAudio = new Audio(window.ALERT_SOUND_URI || '');
     _alertAudio.preload = 'auto';
-    function _unlockAudio() {
+    let _audioUnlocked = false;
+    function _unlockAudio(fromGesture) {
+      if (_audioUnlocked) return; // 解鎖過就別再測，否則顧客每點一下畫面都會嗶一聲
       if (!_alertAudio.paused) return; // 鈴聲正在播的時候不做測試，避免把鈴聲切斷
       const ctx = _getAudioCtx();
       if (ctx && ctx.state === 'suspended') ctx.resume();
-      try { _alertAudio.muted = true; _alertAudio.volume = 0; const p = _alertAudio.play(); if (p && p.then) p.then(() => { _alertAudio.pause(); _alertAudio.currentTime = 0; _alertAudio.volume = 1; _alertAudio.muted = false; }).catch(() => { _alertAudio.volume = 1; _alertAudio.muted = false; }); } catch (e) { _alertAudio.volume = 1; _alertAudio.muted = false; }
+      if (!fromGesture) return; // 沒有手勢就別碰 <audio>：iPad 的 volume 是唯讀的，會整整響一聲
+      try {
+        // 一定要「沒有靜音」才算解鎖。瀏覽器一律放行靜音播放，用 muted 做測試永遠會成功，
+        // 結果就是畫面顯示已啟用、真的要響時卻被自動播放政策擋掉 —— 變成完全沒有聲音。
+        _alertAudio.muted = false; _alertAudio.volume = 1; _alertAudio.currentTime = 0;
+        const p = _alertAudio.play();
+        if (p && p.then) p.then(() => {
+          _alertAudio.pause(); _alertAudio.currentTime = 0; // 立刻停掉，只留下極短的一聲
+          _audioUnlocked = true;
+        }).catch(() => {});
+      } catch (e) {}
     }
-    document.addEventListener('touchend', _unlockAudio, { passive: true });
-    document.addEventListener('click', _unlockAudio, { passive: true });
-    // 盡力自動啟用：載入與回到前景時先試著解鎖（環境允許就直接生效、紅色提示不會出現；
-    // 被瀏覽器擋下也無妨，碰螢幕任一處會立刻解鎖）
-    setTimeout(_unlockAudio, 400);
-    window.addEventListener('pageshow', _unlockAudio);
-    document.addEventListener('visibilitychange', function () { if (!document.hidden) _unlockAudio(); });
+    document.addEventListener('touchend', () => _unlockAudio(true), { passive: true });
+    document.addEventListener('click', () => _unlockAudio(true), { passive: true });
+    // 載入與回前景時只喚醒 AudioContext——這是安靜的、不需要手勢。
+    // <audio> 的解鎖一定要使用者真的碰過螢幕才做得到（而且必須沒有靜音），
+    // 所以「提示音未啟用」的紅色提示會留著，直到有人點畫面任一處為止。
+    setTimeout(() => _unlockAudio(false), 400);
+    window.addEventListener('pageshow', () => _unlockAudio(false));
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) _unlockAudio(false); });
     // 可取餐時顧客手機響：優先播音檔（相容性最高，平板/舊手機也能響），失敗才用 Web Audio
     function playReadySound() {
       let ok = false;

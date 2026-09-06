@@ -875,10 +875,14 @@
     // 提示音音檔（HTMLAudio，相容性最高）；手機互動一次即解鎖
     const _alertAudio = new Audio(window.ALERT_SOUND_URI || '');
     _alertAudio.preload = 'auto';
+    // 解鎖只在使用者手勢裡做，而且成功一次就不再測 —— iPad 的 volume 是唯讀的，
+    // 每測一次就會真的嗶一聲，不設旗標的話顧客每點一下畫面都會聽到。
+    let _audioUnlocked = false;
     function _unlockAudio() {
       const ctx = _getAudioCtx();
       if (ctx && ctx.state === 'suspended') ctx.resume();
-      try { _alertAudio.volume = 0; const p = _alertAudio.play(); if (p && p.then) p.then(() => { _alertAudio.pause(); _alertAudio.currentTime = 0; _alertAudio.volume = 1; }).catch(() => { _alertAudio.volume = 1; }); } catch (e) { _alertAudio.volume = 1; }
+      if (_audioUnlocked || !_alertAudio.paused) return;
+      try { _alertAudio.volume = 0; const p = _alertAudio.play(); if (p && p.then) p.then(() => { _alertAudio.pause(); _alertAudio.currentTime = 0; _alertAudio.volume = 1; _audioUnlocked = true; }).catch(() => { _alertAudio.volume = 1; }); } catch (e) { _alertAudio.volume = 1; }
     }
     document.addEventListener('touchend', _unlockAudio, { passive: true });
     document.addEventListener('click', _unlockAudio, { passive: true });

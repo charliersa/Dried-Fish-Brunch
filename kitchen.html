@@ -271,7 +271,6 @@
           syncUpdateOrder(id, { rejected: true, rejectReason: reason, updatedAt: Date.now() });
         }
       } else if (action === 'enable-sound') {
-        _unlockAudio();
         playNewOrderSound(); // 試響一聲，確認可以出聲
       } else if (action === 'toggle-sound') {
         toggleSound();
@@ -307,30 +306,36 @@
       _audioReady = v;
       try { renderKitchen(); } catch (e) {}
     }
-    function _unlockAudio() {
+    function _unlockAudio(fromGesture) {
+      if (fromGesture && !_bpDone) { _bpDone = true; registerBackendPush(); } // 首次互動就註冊後端推播（關網頁也收得到新單）
+      if (_audioReady) return; // 已經解鎖就不用再測，免得每次點畫面都嗶一下
       if (!_alertAudio.paused) return; // 鈴聲正在播的時候不做測試，避免把鈴聲切斷
       const ctx = _getAudioCtx();
       if (ctx && ctx.state === 'suspended') {
+        // 只是喚醒 AudioContext，不代表 <audio> 播得出來（也沒有合成音備援），所以不標記已解鎖
         const r = ctx.resume();
-        if (r && r.then) r.then(() => { if (ctx.state === 'running') _markAudioReady(true); }).catch(() => {});
+        if (r && r.catch) r.catch(() => {});
       }
+      if (!fromGesture) return; // 沒有手勢就別碰 <audio>：iPad 的 volume 是唯讀的，會整整響一聲
       try {
-        _alertAudio.muted = true; _alertAudio.volume = 0;
+        // 一定要「沒有靜音」才算解鎖。瀏覽器一律放行靜音播放，用 muted 做測試永遠會成功，
+        // 結果就是畫面顯示已啟用、真的要響時卻被自動播放政策擋掉 —— 變成完全沒有聲音。
+        _alertAudio.muted = false; _alertAudio.volume = 1; _alertAudio.currentTime = 0;
         const p = _alertAudio.play();
         if (p && p.then) p.then(() => {
-          _alertAudio.pause(); _alertAudio.currentTime = 0; _alertAudio.volume = 1; _alertAudio.muted = false;
-          _markAudioReady(true); // 真的播得出來才算解鎖
-        }).catch(() => { _alertAudio.volume = 1; _alertAudio.muted = false; });
-      } catch (e) { _alertAudio.volume = 1; _alertAudio.muted = false; }
-      if (!_bpDone) { _bpDone = true; registerBackendPush(); } // 首次互動時註冊後端推播（關網頁也收得到新單）
+          _alertAudio.pause(); _alertAudio.currentTime = 0; // 立刻停掉，只留下極短的一聲
+          _markAudioReady(true);
+        }).catch(() => { _markAudioReady(false); });
+      } catch (e) { _markAudioReady(false); }
     }
-    document.addEventListener('touchend', _unlockAudio, { passive: true });
-    document.addEventListener('click', _unlockAudio, { passive: true });
-    // 盡力自動啟用：載入與回到前景時先試著解鎖（環境允許就直接生效、紅色提示不會出現；
-    // 被瀏覽器擋下也無妨，碰螢幕任一處會立刻解鎖）
-    setTimeout(_unlockAudio, 400);
-    window.addEventListener('pageshow', _unlockAudio);
-    document.addEventListener('visibilitychange', function () { if (!document.hidden) _unlockAudio(); });
+    document.addEventListener('touchend', () => _unlockAudio(true), { passive: true });
+    document.addEventListener('click', () => _unlockAudio(true), { passive: true });
+    // 載入與回前景時只喚醒 AudioContext——這是安靜的、不需要手勢。
+    // <audio> 的解鎖一定要使用者真的碰過螢幕才做得到（而且必須沒有靜音），
+    // 所以「提示音未啟用」的紅色提示會留著，直到有人點畫面任一處為止。
+    setTimeout(() => _unlockAudio(false), 400);
+    window.addEventListener('pageshow', () => _unlockAudio(false));
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) _unlockAudio(false); });
     // 接單裝置螢幕不自動鎖定：鎖屏後 iOS 會無聲切斷連線，新單不響也不顯示
     if (typeof keepScreenAwake === 'function') keepScreenAwake();
     // 註冊本裝置為「後端推播接收者」：授權通知→取得 token→存進 backendTokens
@@ -364,7 +369,7 @@
     function toggleSound() {
       soundEnabled = !soundEnabled;
       try { localStorage.setItem('xyg-kitchen-sound', soundEnabled ? 'on' : 'off'); } catch (e) {}
-      if (soundEnabled) { _unlockAudio(); playNewOrderSound(); } // 開啟時試響一聲並解鎖音訊
+      if (soundEnabled) { playNewOrderSound(); } // 開啟時試響一聲並解鎖音訊
       renderKitchen();
     }
     // 主要用音檔播放（相容性最高，平板也能響）；失敗才退回 Web Audio 合成
