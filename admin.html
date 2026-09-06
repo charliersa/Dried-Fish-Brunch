@@ -508,7 +508,65 @@
     const priceOf = it => (it.price != null ? it.price : (getItem(it.id) ? getItem(it.id).price : 0));
     const dayKey = ts => { const d = new Date(ts); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
     // 預設 Google Sheet 同步網址（Apps Script Web App）；後台欄位有填則以欄位為準
-    const DEFAULT_SHEET_URL = 'https://script.google.com/macros/s/AKfycbyou6DqfDLxPoScbyPWYfVzltXDtUO4MBlqO1pRcn6KITdyw6Q8chZNh7U-A0w9kY7s/exec';
+    // ===== PDF 匯出 =====
+    // iOS 把後台「加入主畫面」當 App 開時，window.print() 完全無效（按了沒反應也不報錯），
+    // 所以改成自己產生 PDF 檔：桌機直接下載，iOS 走系統分享面板的「儲存到檔案」。
+    // 中文字沒有內建字型可用，只能靠 html2canvas 把畫面轉成圖再包成 PDF。
+    const HTML2PDF_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.3/html2pdf.bundle.min.js';
+    const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    let _h2pLoading = null;
+    function loadHtml2Pdf() {
+      if (window.html2pdf) return Promise.resolve(window.html2pdf);
+      if (_h2pLoading) return _h2pLoading;
+      _h2pLoading = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = HTML2PDF_SRC;
+        s.onload = () => resolve(window.html2pdf);
+        s.onerror = () => { _h2pLoading = null; reject(new Error('PDF 元件載入失敗，請確認網路')); };
+        document.head.appendChild(s);
+      });
+      return _h2pLoading;
+    }
+    // 報表標籤（例：「月報　2026-08」）轉成檔名，去掉檔名不能用的字元
+    const pdfFileName = label => '小魚乾營運報表_' + String(label || '').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, '_') + '.pdf';
+
+    async function saveReportPdf(label) {
+      const body = document.querySelector('#print-area .rpt-body');
+      if (!body) { showMessage('請先開啟報表預覽'); return; }
+      const name = pdfFileName(label);
+      showMessage('PDF 產生中，請稍候…');
+      try {
+        const h2p = await loadHtml2Pdf();
+        // 月報訂單多、畫面很長，解析度調低一點，免得 iPad 記憶體撐不住
+        const scale = body.scrollHeight > 6000 ? 1.4 : 2;
+        const blob = await h2p().set({
+          margin: [10, 8, 12, 8],
+          filename: name,
+          image: { type: 'jpeg', quality: 0.95 },
+          html2canvas: { scale, useCORS: true, backgroundColor: '#ffffff', scrollY: 0 },
+          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+          pagebreak: { mode: ['css', 'avoid-all'] },
+        }).from(body).outputPdf('blob');
+
+        // iOS 主畫面模式沒有下載列，但分享面板可以「儲存到檔案」
+        const file = new File([blob], name, { type: 'application/pdf' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: name });
+          return;
+        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = name;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        showMessage('PDF 已儲存 ✅');
+      } catch (e) {
+        if (e && e.name === 'AbortError') return; // 使用者自己在分享面板取消
+        showMessage('PDF 產生失敗：' + ((e && e.message) || '請改用列印'));
+      }
+    }
+
+    const DEFAULT_SHEET_URL ='https://script.google.com/macros/s/AKfycbyou6DqfDLxPoScbyPWYfVzltXDtUO4MBlqO1pRcn6KITdyw6Q8chZNh7U-A0w9kY7s/exec';
 
     // 整理某一天的報表資料（訂單明細 + 金額合計 + 現金/行動分類 + 品項統計）
     function buildReportData(dateStr) {
@@ -681,10 +739,14 @@
       const area = document.getElementById('print-area');
       area.innerHTML = `
         <div class="rpt-toolbar">
-          <button id="rpt-print" style="background:var(--pink);color:#fff;">🖨️ 列印 / 另存 PDF</button>
+          <button id="rpt-pdf" style="background:var(--pink);color:#fff;">📄 儲存 PDF</button>
+          ${isStandalone() ? '' : '<button id="rpt-print" style="background:#eef5f8;color:var(--ink);">🖨️ 列印</button>'}
           <button id="rpt-close" style="background:#eef5f8;color:var(--ink);">✕ 關閉預覽</button>
-          <span class="rpt-hint">在列印視窗的「目的地 / 印表機」選「<b>另存為 PDF</b>」即可存成 PDF 檔</span>
+          <span class="rpt-hint">${isStandalone()
+            ? '主畫面模式沒有列印功能，請按「儲存 PDF」，再從分享面板選「<b>儲存到檔案</b>」'
+            : '「儲存 PDF」直接產生檔案；「列印」則開瀏覽器列印對話框'}</span>
         </div>
+        <div class="rpt-body">
         <div class="rpt-h1">🐟 小魚乾早午餐 · 營運報表</div>
         <div class="rpt-sub">${escapeHtml(r.label)}　列印時間：${fmtDate(Date.now())} ${fmtTime(Date.now())}</div>
 
@@ -699,10 +761,13 @@
         ${profitSection}
 
         <div class="rpt-h2">食材庫存（目前）</div><table><tr><th>品名</th><th style="text-align:right">庫存</th><th style="text-align:right">安全量</th><th>狀態</th><th>供應商</th></tr>${ingRows}</table>
-        <div class="rpt-h2">設備狀態（目前）</div><table><tr><th>設備</th><th>狀態</th><th>上次保養</th></tr>${eqRows}</table>`;
+        <div class="rpt-h2">設備狀態（目前）</div><table><tr><th>設備</th><th>狀態</th><th>上次保養</th></tr>${eqRows}</table>
+        </div>`;
       document.body.classList.add('preview-open');
       window.scrollTo(0, 0);
-      document.getElementById('rpt-print').addEventListener('click', () => window.print());
+      document.getElementById('rpt-pdf').addEventListener('click', () => saveReportPdf(r.label));
+      const _pb = document.getElementById('rpt-print'); // 主畫面模式下不會有這顆
+      if (_pb) _pb.addEventListener('click', () => window.print());
       document.getElementById('rpt-close').addEventListener('click', () => { document.body.classList.remove('preview-open'); area.innerHTML = ''; });
     }
 
@@ -1157,7 +1222,7 @@
               <button data-action="rpt-week" style="${tbtn(reportPeriod === 'week')}">週報</button>
               <button data-action="rpt-month" style="${tbtn(reportPeriod === 'month')}">月報</button>
             </div>
-            <button class="add-btn" data-action="hist-print">🖨️ 列印 / 另存 PDF</button>
+            <button class="add-btn" data-action="hist-print">📑 報表預覽 / 存 PDF</button>
             <button class="add-btn" data-action="hist-sync">📊 同步到 Google Sheet</button>
           </div>
           <div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">營收／訂單／品項為真實歷史資料；成本／薪資取該月封存值（每次修改自動封存，查不到會退回目前設定值並在報表上註明）；食材／設備為目前現況。</div>

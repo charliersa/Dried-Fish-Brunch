@@ -1,6 +1,6 @@
 // 小魚乾店內系統 Service Worker
 const CACHE_PREFIX = 'xyg-order-pwa-';
-const CACHE_NAME = CACHE_PREFIX + 'v22';
+const CACHE_NAME = CACHE_PREFIX + 'v23';
 const ASSETS = [
   './',
   './index.html',
@@ -52,8 +52,10 @@ self.addEventListener('fetch', event => {
   const sameOrigin = url.origin === self.location.origin;
   // Firebase SDK 函式庫（gstatic）：版本化、不變 → cache-first，讓離線也能載入 Firebase（含 Firestore 離線持久化）
   const isFirebaseLib = url.hostname === 'www.gstatic.com' && url.pathname.indexOf('/firebasejs/') !== -1;
+  // 報表匯出 PDF 用的 html2pdf：同樣是版本化不變的檔案，快取起來離線也能存 PDF
+  const isPdfLib = url.hostname === 'cdnjs.cloudflare.com' && url.pathname.indexOf('/html2pdf.js/') !== -1;
 
-  if (isFirebaseLib) {
+  if (isFirebaseLib || isPdfLib) {
     event.respondWith(
       caches.match(req).then(cached => cached || fetch(req).then(res => {
         const clone = res.clone();
