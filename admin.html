@@ -789,7 +789,9 @@
       const r = buildPeriodReport(dateStr, reportPeriod);
       const sheet = reportSheetName(r, dateStr);
       const payload = {
-        date: dateStr, sheet, period: r.period, label: r.label, store: '小魚乾早午餐',
+        // date 也填分頁名稱：舊版 Apps Script 只看 date 當分頁名，若送使用者選的日期，
+        // 月底選 9/30 時日報與月報都會寫進「2026-09-30」互相覆蓋。新版優先讀 sheet，不受影響。
+        date: sheet, pickedDate: dateStr, sheet, period: r.period, label: r.label, store: '小魚乾早午餐',
         range: { start: dayKey(r.start.getTime()), end: dayKey(r.end.getTime()) },
         summary: { count: r.count, paidCount: r.paidCount, unpaidCount: r.unpaidCount, revenue: r.revenue, cashCount: r.cashCount, cashSum: r.cashSum, mobileCount: r.mobileCount, mobileSum: r.mobileSum, dineIn: r.dineIn, takeout: r.takeout },
         // 日報只有一天，逐日明細沒有意義
@@ -815,7 +817,13 @@
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify(payload),
         });
-        showMessage(sheetSyncResult(res.status, await res.text(), sheet).msg);
+        const result = sheetSyncResult(res.status, await res.text(), sheet);
+        // 回傳的分頁名稱跟要求的不同 → Google 那邊還是舊版程式，提醒去重新部署
+        if (result.ok && result.sheet && result.sheet !== sheet) {
+          showMessage('⚠️ 寫進了「' + result.sheet + '」而不是「' + sheet + '」——Apps Script 是舊版，請照 apps-script/Code.gs 重新部署（新版本）');
+          return;
+        }
+        showMessage(result.msg);
       } catch (e) {
         // CORS 被擋、斷網、Apps Script 沒開放權限都會走到這裡。
         // 請求其實已經送出去了，但我們無從得知有沒有寫進去，所以不能報成功。
@@ -828,7 +836,7 @@
       let data = null;
       try { data = JSON.parse(String(text || '').trim()); } catch (e) {}
       if (data && data.ok === true) {
-        return { ok: true, msg: '已寫入 Google Sheet「' + (data.sheet || dateStr) + '」'
+        return { ok: true, sheet: data.sheet, msg: '已寫入 Google Sheet「' + (data.sheet || dateStr) + '」'
           + (data.rows != null ? ('，' + data.rows + ' 筆訂單') : '') + ' ✅' };
       }
       if (data && data.ok === false) {
@@ -1770,13 +1778,10 @@
     }
 
     // 偵測是否有新的「新訂單」進來（首次同步不響，避免開後台時把既有訂單全部當成新單）
-    let _knownIds = null;
+    // 判斷規則在 shared.js makeNewOrderBell：只有剛送出的新單會響
+    const _isNewOrderArrival = makeNewOrderBell(o => o.status === 'new');
     function checkNewOrders(list) {
-      const ids = new Set(list.map(o => o.id));
-      if (_knownIds === null) { _knownIds = ids; return; } // 第一次載入：只記錄不響
-      const hasNew = list.some(o => !_knownIds.has(o.id) && o.status === 'new' && !o.rejected);
-      _knownIds = ids;
-      if (hasNew && soundEnabled) playNewOrderSound();
+      if (_isNewOrderArrival(list) && soundEnabled) playNewOrderSound();
       if (hasNew && !_jumpTimer) {
         // 店主在後台看報表/改菜單時進了新單 → 先響鈴提示，1.5 秒後自動跳到廚房後台，避免漏單
         // （後台的編輯都會自動儲存，跳走不會遺失資料）
