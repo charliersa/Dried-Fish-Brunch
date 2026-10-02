@@ -2033,3 +2033,32 @@ function getSharedStyles() {
     }
   `;
 }
+
+// ===== 新訂單響鈴判斷（全系統共用）=====
+// 只在「顧客剛送出訂單」那一刻響。以前各頁用「這次清單裡有、上次清單裡沒有」判斷，
+// 但清單會因為斷線退回本機備份、重新訂閱、輪詢合併而整份換掉，
+// 舊單一進一出就被當成新單 → 沒人點餐也在響。改成：
+//   1. 看過的單號永遠記住（不會因為清單換掉而忘記）
+//   2. 只有送出時間在最近 NEW_ORDER_RING_WINDOW 內的單才響（舊單重新出現不響）
+// match(o) 決定這一頁在乎哪種單（廚房：status==='new'；收銀：未結帳）。
+const NEW_ORDER_RING_WINDOW = 15 * 60 * 1000;
+function orderSentAtMs(o) {
+  const s = o && o.sentAt;
+  const sent = s ? (typeof s.toMillis === 'function' ? s.toMillis() : Number(s) || 0) : 0;
+  return Math.max(sent, (o && o.createdAt) || 0); // 離線排隊晚到的單，以伺服器收到的時間為準
+}
+function makeNewOrderBell(match) {
+  let seen = null;
+  return function (list) {
+    if (seen === null) { seen = new Set(list.map(o => String(o.id))); return false; } // 第一次載入：只記錄不響
+    const now = Date.now();
+    let hit = false;
+    list.forEach(o => {
+      const id = String(o.id);
+      if (seen.has(id)) return;
+      seen.add(id);
+      if (!o.rejected && now - orderSentAtMs(o) < NEW_ORDER_RING_WINDOW && (!match || match(o))) hit = true;
+    });
+    return hit;
+  };
+}

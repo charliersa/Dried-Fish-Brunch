@@ -384,13 +384,10 @@
       if (navigator.vibrate) navigator.vibrate([120, 60, 120, 60, 200]);
     }
     // 偵測是否有新的「新訂單」進來（首次同步不響，避免載入時把既有訂單全部當成新單）
-    let _knownIds = null;
+    // 判斷規則在 shared.js makeNewOrderBell：只有剛送出的新單會響
+    const _isNewOrderArrival = makeNewOrderBell(o => o.status === 'new');
     function checkNewOrders(list) {
-      const ids = new Set(list.map(o => o.id));
-      if (_knownIds === null) { _knownIds = ids; return; } // 第一次載入：只記錄不響
-      const hasNew = list.some(o => !_knownIds.has(o.id) && o.status === 'new' && !o.rejected);
-      _knownIds = ids;
-      if (hasNew && soundEnabled) playNewOrderSound();
+      if (_isNewOrderArrival(list) && soundEnabled) playNewOrderSound();
     }
     // 餐點完成 → 呼叫 push-server 推播到顧客手機（顧客有授權通知才會有 fcmToken）
     function notifyOrderReady(order) {

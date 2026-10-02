@@ -334,13 +334,10 @@
       if (navigator.vibrate) navigator.vibrate([120, 60, 120, 60, 200]);
     }
     // 偵測是否有新的「未結帳訂單」進來（首次同步不響，避免載入時把既有訂單全部當新單）
-    let _knownIds = null;
+    // 判斷規則在 shared.js makeNewOrderBell：只有剛送出的新單會響
+    const _isNewOrderArrival = makeNewOrderBell(o => !(o.pay && o.pay.paid));
     function checkNewOrders(list) {
-      const ids = new Set(list.map(o => o.id));
-      if (_knownIds === null) { _knownIds = ids; return; } // 第一次載入：只記錄不響
-      const hasNew = list.some(o => !_knownIds.has(o.id) && !o.rejected && !(o.pay && o.pay.paid));
-      _knownIds = ids;
-      if (hasNew && soundEnabled) playNewOrderSound();
+      if (_isNewOrderArrival(list) && soundEnabled) playNewOrderSound();
       if (hasNew && !_jumpTimer) {
         // 有新訂單 → 響鈴後 1.5 秒自動跳到廚房後台，避免停在收銀頁漏單
         if (typeof showMessage === 'function') showMessage('🔔 有新訂單！正在前往廚房後台…');

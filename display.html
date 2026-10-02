@@ -134,7 +134,7 @@
   <script>
     const display = document.getElementById('display');
     let orders = loadOrders();
-    let lastCompleted = null;
+    const _readySeen = new Set(); // 響過（或開頁時就已在）可取餐區的單號
     const _bootAt = Date.now(); // 開頁時間：頭幾秒不補響既有的可取餐號碼
 
     // 叫號提示音（全系統唯一音源 鈴聲.mp3）；瀏覽器要求先有一次互動才能出聲
@@ -172,15 +172,18 @@
 
       // 有新號碼進入「可取餐」時嗶一聲
       // 開頁 5 秒內不響：重新整理後看到「本來就可取餐」的舊號碼不需要再響一次
-      const topId = ready.length ? ready[0].id : null;
-      if (topId && lastCompleted !== topId && Date.now() - _bootAt > 5000 && typeof Audio !== 'undefined') {
+      // 以前比的是「排第一的號碼有沒有換」，結果別張單結帳、取餐一更新順序就跟著響；
+      // 改成每個單號只在第一次進入可取餐區時響一次
+      const booting = Date.now() - _bootAt <= 5000;
+      let newlyReady = false;
+      ready.forEach(o => { if (!_readySeen.has(o.id)) { _readySeen.add(o.id); if (!booting) newlyReady = true; } });
+      if (newlyReady && typeof Audio !== 'undefined') {
         try {
           _alertAudio.currentTime = 0;
           _alertAudio.muted = false;
           _alertAudio.play().catch(() => {});
         } catch (e) {}
       }
-      lastCompleted = topId;
 
       const readyHtml = ready.length
         ? `<div style="display:flex;flex-wrap:wrap;gap:24px;justify-content:center;align-items:center;">
@@ -211,13 +214,9 @@
     }
 
     // 新訂單也要響鈴：平板不管停在哪一頁都聽得到新單進來
-    let _knownIds = null;
+    const _isNewOrderArrival = makeNewOrderBell(o => o.status === 'new'); // 規則見 shared.js
     function checkNewOrders(list) {
-      const ids = new Set(list.map(o => o.id));
-      if (_knownIds === null) { _knownIds = ids; return; } // 第一次載入只記錄不響
-      const hasNew = list.some(o => !_knownIds.has(o.id) && o.status === 'new' && !o.rejected);
-      _knownIds = ids;
-      if (hasNew) {
+      if (_isNewOrderArrival(list)) {
         try { _alertAudio.currentTime = 0; _alertAudio.volume = 1; _alertAudio.muted = false; const p = _alertAudio.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
       }
     }

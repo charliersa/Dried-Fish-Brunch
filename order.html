@@ -982,13 +982,9 @@
     }, { passive: true });
 
     // 手機顧客送來新訂單 → 店內點餐機也響鈴提醒（店主要求：平板停在哪一頁都要聽得到）
-    let _bellKnownIds = null;
+    const _isNewOrderArrival = makeNewOrderBell(o => o.status === 'new'); // 規則見 shared.js
     function checkNewOrdersBell(list) {
-      const ids = new Set(list.map(o => o.id));
-      if (_bellKnownIds === null) { _bellKnownIds = ids; return; } // 第一次載入只記錄不響
-      const hasNew = list.some(o => !_bellKnownIds.has(o.id) && o.status === 'new' && !o.rejected);
-      _bellKnownIds = ids;
-      if (hasNew) {
+      if (_isNewOrderArrival(list)) {
         try { _alertAudio.currentTime = 0; _alertAudio.volume = 1; _alertAudio.muted = false; const p = _alertAudio.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
       }
     }
